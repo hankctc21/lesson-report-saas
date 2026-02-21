@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: lesson-report-saas
+  security:
+    user:
+      name: ${APP_BASIC_USER:admin}
+      password: ${APP_BASIC_PASSWORD:change_this_in_prod}
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/lesson_report
+    username: lesson_report
+    password: change_me
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+
+server:
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain,text/html,text/css,application/javascript
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    org.springframework.security: INFO
+
+app:
+  default-instructor-id: ${APP_DEFAULT_INSTRUCTOR_ID:11111111-1111-1111-1111-111111111111}
+  share-base-url: ${APP_SHARE_BASE_URL:http://localhost:8080/api/v1/share}
