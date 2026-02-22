@@ -2,6 +2,7 @@ build/
 .gradle/
 .gradle-home/
 .m2/
+.kotlin/
 target/
 
 ### IntelliJ ###

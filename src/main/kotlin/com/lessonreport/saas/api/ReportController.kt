@@ -28,7 +28,7 @@ class ReportController(
         val session = sessionRepository.findByIdAndInstructorId(request.sessionId, instructorId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found")
 
-        if (reportRepository.findBySessionId(session.id!! ) != null) {
+        if (reportRepository.findBySessionId(session.id!!) != null) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Report already exists for this session")
         }
 
