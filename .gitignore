@@ -9,6 +9,7 @@ target/
 *.iws
 *.iml
 *.ipr
+sc/
 
 ### OS ###
 .DS_Store
