@@ -22,7 +22,7 @@ class ShareController(
     private val reportRepository: ReportRepository,
     private val reportShareRepository: ReportShareRepository,
     private val instructorContext: InstructorContext,
-    @Value("\${app.share-base-url:http://localhost:8080/api/v1/share}")
+    @Value("\${app.share-base-url:http://localhost:18080/api/v1/share}")
     private val shareBaseUrl: String
 ) {
     @PostMapping("/reports/{reportId}/share")

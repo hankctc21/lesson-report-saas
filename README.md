@@ -19,12 +19,24 @@
 - `.github/workflows/ci.yml`: GitHub Actions CI
 
 ## 빠른 시작
-1. PostgreSQL DB/계정을 생성합니다.
+1. PostgreSQL DB를 실행합니다.
+```bash
+docker compose up -d
+```
 2. 실행 환경변수(권장) 또는 `src/main/resources/application.yml` 값을 설정합니다.
 3. 아래 명령으로 실행합니다.
 ```bash
 ./gradlew bootRun
 ```
+
+DB 중지:
+```bash
+docker compose down
+```
+
+실행 후 기본 주소:
+- API 서버: `http://localhost:18080`
+- Swagger UI: `http://localhost:18080/swagger-ui/index.html`
 
 ## 환경변수
 - `APP_AUTH_USERNAME` (default: `admin`)
@@ -33,7 +45,7 @@
 - `APP_AUTH_TOKEN_TTL_MINUTES` (default: `120`)
 - `APP_AUTH_INSTRUCTOR_ID` (default: `11111111-1111-1111-1111-111111111111`)
 - `APP_DEFAULT_INSTRUCTOR_ID` (default: `11111111-1111-1111-1111-111111111111`)
-- `APP_SHARE_BASE_URL` (default: `http://localhost:8080/api/v1/share`)
+- `APP_SHARE_BASE_URL` (default: `http://localhost:18080/api/v1/share`)
 
 DB 연결(Spring datasource):
 - `SPRING_DATASOURCE_URL`
@@ -55,6 +67,53 @@ DB 연결(Spring datasource):
 - Swagger UI: `GET /swagger-ui/index.html`
 - OpenAPI JSON: `GET /v3/api-docs`
 - 로그인 후 발급된 `accessToken`을 `Authorization: Bearer <token>` 헤더로 전달하세요.
+
+예시 (터미널):
+```bash
+# 1) 로그인해서 JWT 발급
+curl -s -X POST http://localhost:18080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"change_this_in_prod"}'
+
+# 응답의 accessToken 값을 복사
+TOKEN=여기에_JWT_토큰
+
+# 2) 인증이 필요한 API 호출
+curl -s http://localhost:18080/api/v1/clients \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## 로직 수행 흐름
+1. 로그인
+- 클라이언트가 `POST /api/v1/auth/login` 호출
+- 서버가 `APP_AUTH_USERNAME / APP_AUTH_PASSWORD`와 비교
+- 일치하면 JWT 발급 (`instructorId` claim 포함)
+
+2. 인증 필터 처리
+- 인증이 필요한 API 요청 시 `Authorization: Bearer <JWT>` 전달
+- `JwtAuthenticationFilter`가 토큰을 검증하고 SecurityContext에 사용자 정보 저장
+
+3. 강사 컨텍스트 확정
+- `InstructorContext`가 SecurityContext의 principal에서 `instructorId`를 읽음
+- 이후 조회/생성/수정은 이 `instructorId` 기준으로 데이터 접근
+
+4. 핵심 API 처리
+- `clients`: 회원 생성/조회/수정
+- `sessions`: 수업 세션 생성/날짜별 조회
+- `reports`: 세션 기반 리포트 작성/조회/수정
+- `share`: 리포트 공유 토큰 발급 및 공개 조회
+
+5. 공유 링크 동작
+- `POST /api/v1/reports/{reportId}/share`로 토큰 생성(만료시간 포함)
+- 회원이 `GET /api/v1/share/{token}` 접근 시 만료/폐기 여부 확인 후 리포트 열람
+- 조회 시 `viewCount`, `lastViewedAt` 갱신
+
+## 실제 실행 순서(권장)
+1. 앱 실행: `./gradlew bootRun`
+2. Swagger 접속: `http://localhost:18080/swagger-ui/index.html`
+3. `POST /api/v1/auth/login` 실행 후 토큰 획득
+4. Swagger 우측 상단 `Authorize`에 `Bearer <토큰>` 입력
+5. `clients -> sessions -> reports -> share` 순서로 기능 테스트
 
 ## MVP API
 - `GET /api/v1/clients`
