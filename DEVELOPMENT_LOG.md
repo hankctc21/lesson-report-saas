@@ -68,6 +68,25 @@
 - 데모 데이터 시드
   - Flyway `V3`로 회원/세션/리포트 샘플 데이터 제공
 
+## Verification Notes (2026-02-23, later)
+
+- 프론트 화면 흐름을 강사 업무 중심으로 재구성
+  - 회원 목록 검색/선택 중심 + 선택 회원 상세 패널
+  - 세션 생성 -> 리포트 작성으로 자연스럽게 이어지는 단계형 UX
+  - 리포트 목록/상세 패널 분리로 데이터가 많아도 한 화면에서 처리 가능
+- 리포트 중복 생성 안내 UX 개선
+  - 완료 세션 기본 숨김 정책을 명시
+  - 저장 직후 혼란을 주는 경고 노출 조건 조정
+- 공유 링크 사용성 개선
+  - API 링크 노출 제거
+  - 사용자용 공유 링크(`/share/{token}`) 중심 노출
+  - 클립보드 복사 실패 시 `textarea + execCommand` 폴백 추가
+- 세션 선택 가독성 개선 준비
+  - 백엔드 `SessionWithReport` 응답에 `createdAt` 추가하여 같은 날짜 세션 구분 기반 마련
+- 개발 환경 개선
+  - IntelliJ `.run` 설정 추가/보강 (Backend bootRun, Frontend npm dev)
+  - `application.yml` deprecated 경고 키 정리 (`spring.web.error.*`)
+
 ## Commit Message Guideline (Recommended)
 
 - 형식: `type: short summary`

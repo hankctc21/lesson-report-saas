@@ -21,6 +21,11 @@ spring:
         format_sql: false
   flyway:
     enabled: true
+  web:
+    error:
+      include-message: never
+      include-binding-errors: never
+      include-stacktrace: never
 
 server:
   port: ${SERVER_PORT:18080}
@@ -28,11 +33,6 @@ server:
   compression:
     enabled: true
     mime-types: application/json,text/plain,text/html,text/css,application/javascript
-  error:
-    include-message: never
-    include-binding-errors: never
-    include-stacktrace: never
-
 management:
   endpoints:
     web:

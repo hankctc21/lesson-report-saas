@@ -1,0 +1,30 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Backend BootRun (Gradle)" type="GradleRunConfiguration" factoryName="Gradle">
+    <option name="env">
+      <map>
+        <entry key="SPRING_DATASOURCE_URL" value="jdbc:postgresql://localhost:5432/lesson_report" />
+        <entry key="SPRING_DATASOURCE_USERNAME" value="lesson_report" />
+        <entry key="SPRING_DATASOURCE_PASSWORD" value="change_me" />
+        <entry key="SERVER_PORT" value="18080" />
+      </map>
+    </option>
+    <option name="passParentEnvs" value="true" />
+    <ExternalSystemSettings>
+      <option name="executionName" />
+      <option name="externalProjectPath" value="$PROJECT_DIR$" />
+      <option name="externalSystemIdString" value="GRADLE" />
+      <option name="scriptParameters" value="" />
+      <option name="taskDescriptions">
+        <list />
+      </option>
+      <option name="taskNames">
+        <list>
+          <option value="bootRun" />
+        </list>
+      </option>
+      <option name="vmOptions" value="" />
+    </ExternalSystemSettings>
+    <GradleScriptDebugEnabled>false</GradleScriptDebugEnabled>
+    <method v="2" />
+  </configuration>
+</component>

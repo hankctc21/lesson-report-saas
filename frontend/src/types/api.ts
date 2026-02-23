@@ -19,6 +19,7 @@ export type Session = {
   date: string;
   type: "PERSONAL" | "GROUP";
   memo?: string;
+  createdAt: string;
 };
 
 export type SessionWithReport = Session & {

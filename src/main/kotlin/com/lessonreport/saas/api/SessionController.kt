@@ -12,6 +12,7 @@ import jakarta.validation.constraints.Size
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -59,6 +60,7 @@ class SessionController(
                     date = it.sessionDate!!,
                     type = it.sessionType!!,
                     memo = it.memo,
+                    createdAt = it.createdAt ?: Instant.now(),
                     hasReport = reportRepository.findBySessionId(it.id!!) != null
                 )
             }
@@ -69,7 +71,8 @@ class SessionController(
         clientId = client!!.id!!,
         date = sessionDate!!,
         type = sessionType!!,
-        memo = memo
+        memo = memo,
+        createdAt = createdAt ?: Instant.now()
     )
 }
 
@@ -85,7 +88,8 @@ data class SessionResponse(
     val clientId: UUID,
     val date: LocalDate,
     val type: SessionType,
-    val memo: String?
+    val memo: String?,
+    val createdAt: Instant
 )
 
 data class SessionWithReportStatusResponse(
@@ -94,5 +98,6 @@ data class SessionWithReportStatusResponse(
     val date: LocalDate,
     val type: SessionType,
     val memo: String?,
+    val createdAt: Instant,
     val hasReport: Boolean
 )
