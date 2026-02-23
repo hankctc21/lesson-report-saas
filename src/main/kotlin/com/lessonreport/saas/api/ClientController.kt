@@ -1,6 +1,7 @@
 package com.lessonreport.saas.api
 
 import com.lessonreport.saas.domain.Client
+import com.lessonreport.saas.repository.CenterRepository
 import com.lessonreport.saas.repository.ClientRepository
 import com.lessonreport.saas.service.InstructorContext
 import jakarta.validation.Valid
@@ -16,12 +17,18 @@ import java.util.UUID
 @RequestMapping("/api/v1/clients")
 class ClientController(
     private val clientRepository: ClientRepository,
+    private val centerRepository: CenterRepository,
     private val instructorContext: InstructorContext
 ) {
     @GetMapping
-    fun list(): List<ClientResponse> {
+    fun list(@RequestParam(required = false) centerId: UUID?): List<ClientResponse> {
         val instructorId = instructorContext.currentInstructorId()
-        return clientRepository.findByInstructorIdOrderByCreatedAtDesc(instructorId).map { it.toResponse() }
+        val rows = if (centerId == null) {
+            clientRepository.findByInstructorIdOrderByCreatedAtDesc(instructorId)
+        } else {
+            clientRepository.findByInstructorIdAndCenterIdOrderByCreatedAtDesc(instructorId, centerId)
+        }
+        return rows.map { it.toResponse() }
     }
 
     @PostMapping
@@ -29,6 +36,7 @@ class ClientController(
     fun create(@Valid @RequestBody request: ClientCreateRequest): ClientResponse {
         val client = Client(
             instructor = instructorContext.currentInstructor(),
+            center = request.centerId?.let { findOwnedCenter(it) },
             name = requireName(request.name),
             phone = request.phone,
             flagsNote = request.flagsNote,
@@ -45,6 +53,7 @@ class ClientController(
         val client = findOwnedClient(clientId)
 
         request.name?.let { client.name = requireName(it) }
+        request.centerId?.let { client.center = findOwnedCenter(it) }
         request.phone?.let { client.phone = it }
         request.flagsNote?.let { client.flagsNote = it }
         request.note?.let { client.note = it }
@@ -58,6 +67,10 @@ class ClientController(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Client not found")
     }
 
+    private fun findOwnedCenter(centerId: UUID) =
+        centerRepository.findByIdAndInstructorId(centerId, instructorContext.currentInstructorId())
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Center not found")
+
     private fun requireName(name: String): String {
         if (name.isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Client name is required")
@@ -67,6 +80,7 @@ class ClientController(
 
     private fun Client.toResponse() = ClientResponse(
         id = id!!,
+        centerId = center?.id,
         name = name!!,
         phone = phone,
         flagsNote = flagsNote,
@@ -77,6 +91,7 @@ class ClientController(
 
 data class ClientCreateRequest(
     @field:NotBlank @field:Size(max = 80) val name: String,
+    val centerId: UUID? = null,
     @field:Size(max = 40) val phone: String? = null,
     @field:Size(max = 500) val flagsNote: String? = null,
     @field:Size(max = 1000) val note: String? = null
@@ -84,6 +99,7 @@ data class ClientCreateRequest(
 
 data class ClientUpdateRequest(
     @field:Size(max = 80) val name: String? = null,
+    val centerId: UUID? = null,
     @field:Size(max = 40) val phone: String? = null,
     @field:Size(max = 500) val flagsNote: String? = null,
     @field:Size(max = 1000) val note: String? = null
@@ -91,6 +107,7 @@ data class ClientUpdateRequest(
 
 data class ClientResponse(
     val id: UUID,
+    val centerId: UUID?,
     val name: String,
     val phone: String?,
     val flagsNote: String?,

@@ -12,15 +12,13 @@ import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import org.hibernate.annotations.CreationTimestamp
-import org.hibernate.annotations.UpdateTimestamp
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.util.UUID
 
 @Entity
-@Table(name = "sessions")
-open class LessonSession(
+@Table(name = "client_progress_photos")
+open class ClientProgressPhoto(
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     open var id: UUID? = null,
@@ -33,24 +31,26 @@ open class LessonSession(
     @JoinColumn(name = "client_id", nullable = false)
     open var client: Client? = null,
 
-    @Column(name = "session_date", nullable = false)
-    open var sessionDate: LocalDate? = null,
-
     @Enumerated(EnumType.STRING)
-    @Column(name = "session_type", nullable = false, length = 20)
-    open var sessionType: SessionType? = null,
+    @Column(name = "phase", nullable = false, length = 20)
+    open var phase: ProgressPhotoPhase = ProgressPhotoPhase.ETC,
 
     @Column(length = 500)
-    open var memo: String? = null,
+    open var note: String? = null,
 
-    @Column(name = "session_start_time")
-    open var sessionStartTime: LocalTime? = null,
+    @Column(name = "taken_on")
+    open var takenOn: LocalDate? = null,
+
+    @Column(name = "file_name", nullable = false, length = 255)
+    open var fileName: String? = null,
+
+    @Column(name = "content_type", nullable = false, length = 120)
+    open var contentType: String? = null,
+
+    @Column(name = "storage_path", nullable = false, length = 1000)
+    open var storagePath: String? = null,
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
-    open var createdAt: Instant? = null,
-
-    @UpdateTimestamp
-    @Column(name = "updated_at", nullable = false)
-    open var updatedAt: Instant? = null
+    open var createdAt: Instant? = null
 )

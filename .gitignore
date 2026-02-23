@@ -4,6 +4,7 @@ build/
 .m2/
 .kotlin/
 target/
+uploads/
 
 ### IntelliJ ###
 .idea/

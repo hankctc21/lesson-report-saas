@@ -2,9 +2,9 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #10233b;
+  --ink: #1e293b;
   --surface: #ffffffcc;
-  --accent: #0ea5a8;
+  --accent: #334155;
 }
 
 * {
@@ -13,7 +13,7 @@
 
 body {
   color: var(--ink);
-  background: #f7fbff;
+  background: #f3f5f9;
 }
 
 .field {
@@ -26,13 +26,13 @@ body {
 }
 
 .field:focus {
-  border-color: #06b6d4;
-  box-shadow: 0 0 0 3px #06b6d433;
+  border-color: #64748b;
+  box-shadow: 0 0 0 3px #64748b26;
 }
 
 .btn {
   border-radius: 0.8rem;
-  background: linear-gradient(120deg, #0ea5a8, #0891b2);
+  background: linear-gradient(120deg, #334155, #1f2937);
   color: white;
   padding: 0.55rem 0.9rem;
   font-weight: 600;

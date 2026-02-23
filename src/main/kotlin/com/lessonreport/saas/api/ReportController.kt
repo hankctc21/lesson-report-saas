@@ -12,6 +12,8 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 @RestController
@@ -21,6 +23,8 @@ class ReportController(
     private val sessionRepository: LessonSessionRepository,
     private val instructorContext: InstructorContext
 ) {
+    private val timeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
     @PostMapping("/reports")
     @ResponseStatus(HttpStatus.CREATED)
     fun create(@Valid @RequestBody request: ReportCreateRequest): ReportResponse {
@@ -86,6 +90,9 @@ class ReportController(
         id = id!!,
         clientId = client!!.id!!,
         sessionId = session!!.id!!,
+        sessionDate = session!!.sessionDate ?: LocalDate.now(),
+        sessionType = session!!.sessionType!!.name,
+        sessionStartTime = session!!.sessionStartTime?.format(timeFormatter),
         summaryItems = summaryItems,
         strengthNote = strengthNote,
         improveNote = improveNote,
@@ -120,6 +127,9 @@ data class ReportResponse(
     val id: UUID,
     val clientId: UUID,
     val sessionId: UUID,
+    val sessionDate: LocalDate,
+    val sessionType: String,
+    val sessionStartTime: String?,
     val summaryItems: String?,
     val strengthNote: String?,
     val improveNote: String?,

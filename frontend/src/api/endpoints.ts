@@ -1,5 +1,19 @@
 import { api } from "./client";
-import type { Client, LoginResponse, PublicShare, Report, Session, SessionWithReport, ShareResponse } from "../types/api";
+import type {
+  Center,
+  Client,
+  ClientProfile,
+  ClientProgressPhoto,
+  GroupSequence,
+  Homework,
+  LoginResponse,
+  PublicShare,
+  Report,
+  ReportPhoto,
+  Session,
+  SessionWithReport,
+  ShareResponse
+} from "../types/api";
 
 export const login = async (username: string, password: string) => {
   const { data } = await api.post<LoginResponse>("/api/v1/auth/login", { username, password });
@@ -11,17 +25,104 @@ export const health = async () => {
   return data;
 };
 
-export const listClients = async () => {
-  const { data } = await api.get<Client[]>("/api/v1/clients");
+export const listCenters = async () => {
+  const { data } = await api.get<Center[]>("/api/v1/centers");
   return data;
 };
 
-export const createClient = async (payload: { name: string; phone?: string; flagsNote?: string; note?: string }) => {
+export const createCenter = async (payload: { name: string }) => {
+  const { data } = await api.post<Center>("/api/v1/centers", payload);
+  return data;
+};
+
+export const listClients = async (centerId?: string) => {
+  const q = centerId ? `?centerId=${centerId}` : "";
+  const { data } = await api.get<Client[]>(`/api/v1/clients${q}`);
+  return data;
+};
+
+export const createClient = async (payload: { name: string; centerId?: string; phone?: string; flagsNote?: string; note?: string }) => {
   const { data } = await api.post<Client>("/api/v1/clients", payload);
   return data;
 };
 
-export const createSession = async (payload: { clientId: string; date: string; type: "PERSONAL" | "GROUP"; memo?: string }) => {
+export const updateClient = async (clientId: string, payload: { name?: string; centerId?: string; phone?: string; flagsNote?: string; note?: string }) => {
+  const { data } = await api.patch<Client>(`/api/v1/clients/${clientId}`, payload);
+  return data;
+};
+
+export const getClientProfile = async (clientId: string) => {
+  const { data } = await api.get<ClientProfile>(`/api/v1/clients/${clientId}/profile`);
+  return data;
+};
+
+export const upsertClientProfile = async (
+  clientId: string,
+  payload: {
+    painNote?: string;
+    goalNote?: string;
+    surgeryHistory?: string;
+    beforeClassMemo?: string;
+    afterClassMemo?: string;
+    nextLessonPlan?: string;
+  }
+) => {
+  const { data } = await api.put<ClientProfile>(`/api/v1/clients/${clientId}/profile`, payload);
+  return data;
+};
+
+export const listClientHomeworks = async (clientId: string) => {
+  const { data } = await api.get<Homework[]>(`/api/v1/clients/${clientId}/homeworks`);
+  return data;
+};
+
+export const createClientHomework = async (clientId: string, payload: { content: string; remindAt?: string }) => {
+  const { data } = await api.post<Homework>(`/api/v1/clients/${clientId}/homeworks`, payload);
+  return data;
+};
+
+export const listGroupSequences = async (centerId: string) => {
+  const { data } = await api.get<GroupSequence[]>(`/api/v1/group-sequences?centerId=${centerId}`);
+  return data;
+};
+
+export const createGroupSequence = async (payload: {
+  centerId: string;
+  classDate: string;
+  equipmentBrand?: string;
+  springSetting?: string;
+  todaySequence?: string;
+  nextSequence?: string;
+  beforeMemo?: string;
+  afterMemo?: string;
+  memberNotes?: string;
+}) => {
+  const { data } = await api.post<GroupSequence>("/api/v1/group-sequences", payload);
+  return data;
+};
+
+export const listClientProgressPhotos = async (clientId: string) => {
+  const { data } = await api.get<ClientProgressPhoto[]>(`/api/v1/clients/${clientId}/progress-photos`);
+  return data;
+};
+
+export const uploadClientProgressPhoto = async (
+  clientId: string,
+  file: File,
+  payload: { phase?: "BEFORE" | "AFTER" | "ETC"; note?: string; takenOn?: string }
+) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (payload.phase) fd.append("phase", payload.phase);
+  if (payload.note) fd.append("note", payload.note);
+  if (payload.takenOn) fd.append("takenOn", payload.takenOn);
+  const { data } = await api.post<ClientProgressPhoto>(`/api/v1/clients/${clientId}/progress-photos`, fd, {
+    headers: { "Content-Type": "multipart/form-data" }
+  });
+  return data;
+};
+
+export const createSession = async (payload: { clientId: string; date: string; type: "PERSONAL" | "GROUP"; memo?: string; startTime?: string }) => {
   const { data } = await api.post<Session>("/api/v1/sessions", payload);
   return data;
 };
@@ -38,6 +139,28 @@ export const listSessionsWithReportByDate = async (date: string) => {
 
 export const createReport = async (payload: { sessionId: string; summaryItems?: string; strengthNote?: string; improveNote?: string; nextGoal?: string }) => {
   const { data } = await api.post<Report>("/api/v1/reports", payload);
+  return data;
+};
+
+export const updateReport = async (
+  reportId: string,
+  payload: { summaryItems?: string; strengthNote?: string; improveNote?: string; nextGoal?: string; homework?: string; painChange?: string }
+) => {
+  const { data } = await api.patch<Report>(`/api/v1/reports/${reportId}`, payload);
+  return data;
+};
+
+export const listReportPhotos = async (reportId: string) => {
+  const { data } = await api.get<ReportPhoto[]>(`/api/v1/reports/${reportId}/photos`);
+  return data;
+};
+
+export const uploadReportPhoto = async (reportId: string, file: File) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  const { data } = await api.post<ReportPhoto>(`/api/v1/reports/${reportId}/photos`, fd, {
+    headers: { "Content-Type": "multipart/form-data" }
+  });
   return data;
 };
 

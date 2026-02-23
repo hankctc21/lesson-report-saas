@@ -25,6 +25,10 @@ open class Client(
     @JoinColumn(name = "instructor_id", nullable = false)
     open var instructor: Instructor? = null,
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "center_id")
+    open var center: Center? = null,
+
     @Column(nullable = false, length = 80)
     open var name: String? = null,
 

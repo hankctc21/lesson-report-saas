@@ -6,10 +6,63 @@ export type LoginResponse = {
 
 export type Client = {
   id: string;
+  centerId?: string;
   name: string;
   phone?: string;
   flagsNote?: string;
   note?: string;
+  createdAt: string;
+};
+
+export type Center = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+};
+
+export type ClientProfile = {
+  clientId: string;
+  painNote?: string;
+  goalNote?: string;
+  surgeryHistory?: string;
+  beforeClassMemo?: string;
+  afterClassMemo?: string;
+  nextLessonPlan?: string;
+  updatedAt: string;
+};
+
+export type Homework = {
+  id: string;
+  content: string;
+  remindAt?: string;
+  notifiedAt?: string;
+  completed: boolean;
+  createdAt: string;
+};
+
+export type GroupSequence = {
+  id: string;
+  centerId: string;
+  classDate: string;
+  equipmentBrand?: string;
+  springSetting?: string;
+  todaySequence?: string;
+  nextSequence?: string;
+  beforeMemo?: string;
+  afterMemo?: string;
+  memberNotes?: string;
+  createdAt: string;
+};
+
+export type ClientProgressPhoto = {
+  id: string;
+  clientId: string;
+  phase: "BEFORE" | "AFTER" | "ETC";
+  note?: string;
+  takenOn?: string;
+  fileName: string;
+  imageUrl: string;
   createdAt: string;
 };
 
@@ -19,6 +72,7 @@ export type Session = {
   date: string;
   type: "PERSONAL" | "GROUP";
   memo?: string;
+  startTime?: string;
   createdAt: string;
 };
 
@@ -30,6 +84,9 @@ export type Report = {
   id: string;
   clientId: string;
   sessionId: string;
+  sessionDate: string;
+  sessionType: "PERSONAL" | "GROUP";
+  sessionStartTime?: string;
   summaryItems?: string;
   strengthNote?: string;
   improveNote?: string;
@@ -38,6 +95,14 @@ export type Report = {
   painChange?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ReportPhoto = {
+  id: string;
+  reportId: string;
+  fileName: string;
+  createdAt: string;
+  imageUrl: string;
 };
 
 export type ShareResponse = {
@@ -49,12 +114,15 @@ export type ShareResponse = {
 export type PublicShare = {
   clientName: string;
   sessionDate: string;
+  sessionStartTime?: string;
   summaryItems?: string;
   strengthNote?: string;
   improveNote?: string;
   nextGoal?: string;
   homework?: string;
   painChange?: string;
+  photos: { id: string; imageUrl: string; createdAt: string }[];
+  progressPhotos: { id: string; phase: string; note?: string; takenOn?: string; imageUrl: string; createdAt: string }[];
   expiresAt: string;
   viewCount: number;
 };

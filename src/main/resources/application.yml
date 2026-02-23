@@ -50,6 +50,10 @@ logging:
 app:
   default-instructor-id: ${APP_DEFAULT_INSTRUCTOR_ID:11111111-1111-1111-1111-111111111111}
   share-base-url: ${APP_SHARE_BASE_URL:http://localhost:18080/api/v1/share}
+  upload-dir: ${APP_UPLOAD_DIR:./uploads}
+  homework-reminder-poll-ms: ${APP_HOMEWORK_REMINDER_POLL_MS:60000}
+  notifications:
+    webhook-url: ${APP_NOTIFICATIONS_WEBHOOK_URL:}
   auth:
     secret: ${APP_AUTH_SECRET:change-this-jwt-secret-min-32-bytes}
     token-ttl-minutes: ${APP_AUTH_TOKEN_TTL_MINUTES:120}

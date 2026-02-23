@@ -6,5 +6,6 @@ import java.util.UUID
 
 interface ClientRepository : JpaRepository<Client, UUID> {
     fun findByInstructorIdOrderByCreatedAtDesc(instructorId: UUID): List<Client>
+    fun findByInstructorIdAndCenterIdOrderByCreatedAtDesc(instructorId: UUID, centerId: UUID): List<Client>
     fun findByIdAndInstructorId(id: UUID, instructorId: UUID): Client?
 }

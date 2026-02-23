@@ -21,11 +21,11 @@ export default function LoginPage({ onLogin }: Props) {
   };
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_10%_20%,#d5f6ff_0,#f7fbff_35%,#fff8f0_100%)] p-6">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_10%_20%,#eef2f7_0,#f7f9fc_35%,#f2f4f8_100%)] p-6">
       <div className="mx-auto mt-16 max-w-md rounded-3xl border border-white/60 bg-white/70 p-8 shadow-2xl backdrop-blur-xl animate-rise">
         <p className="font-['Fraunces'] text-sm tracking-wide text-slate-600">Lesson Report</p>
-        <h1 className="mt-2 font-['Fraunces'] text-3xl text-slate-900">Instructor Console</h1>
-        <p className="mt-2 text-sm text-slate-600">백엔드 API(18080)에 연결된 운영 콘솔 로그인</p>
+        <h1 className="mt-2 font-['Fraunces'] text-3xl text-slate-900">수업 리포트 관리자</h1>
+        <p className="mt-2 text-sm text-slate-600">계정으로 로그인해 수업 리포트를 관리하세요.</p>
 
         <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
           <input className="field" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />

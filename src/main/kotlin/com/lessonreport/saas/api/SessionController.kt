@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 @RestController
@@ -24,6 +26,8 @@ class SessionController(
     private val reportRepository: ReportRepository,
     private val instructorContext: InstructorContext
 ) {
+    private val timeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun create(@Valid @RequestBody request: SessionCreateRequest): SessionResponse {
@@ -36,7 +40,8 @@ class SessionController(
             client = client,
             sessionDate = request.date,
             sessionType = request.type,
-            memo = request.memo
+            memo = request.memo,
+            sessionStartTime = request.startTime?.let { parseStartTime(it) }
         )
 
         return sessionRepository.save(session).toResponse()
@@ -60,6 +65,7 @@ class SessionController(
                     date = it.sessionDate!!,
                     type = it.sessionType!!,
                     memo = it.memo,
+                    startTime = it.sessionStartTime?.format(timeFormatter),
                     createdAt = it.createdAt ?: Instant.now(),
                     hasReport = reportRepository.findBySessionId(it.id!!) != null
                 )
@@ -72,15 +78,29 @@ class SessionController(
         date = sessionDate!!,
         type = sessionType!!,
         memo = memo,
+        startTime = sessionStartTime?.format(timeFormatter),
         createdAt = createdAt ?: Instant.now()
     )
+
+    private fun parseStartTime(value: String): LocalTime {
+        val parsed = try {
+            LocalTime.parse(value, timeFormatter)
+        } catch (_: Exception) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "startTime must be HH:mm format")
+        }
+        if (parsed.minute % 10 != 0) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "startTime must be 10-minute intervals")
+        }
+        return parsed
+    }
 }
 
 data class SessionCreateRequest(
     @field:NotNull val clientId: UUID,
     @field:NotNull val date: LocalDate,
     @field:NotNull val type: SessionType,
-    @field:Size(max = 500) val memo: String? = null
+    @field:Size(max = 500) val memo: String? = null,
+    val startTime: String? = null
 )
 
 data class SessionResponse(
@@ -89,6 +109,7 @@ data class SessionResponse(
     val date: LocalDate,
     val type: SessionType,
     val memo: String?,
+    val startTime: String?,
     val createdAt: Instant
 )
 
@@ -98,6 +119,7 @@ data class SessionWithReportStatusResponse(
     val date: LocalDate,
     val type: SessionType,
     val memo: String?,
+    val startTime: String?,
     val createdAt: Instant,
     val hasReport: Boolean
 )
