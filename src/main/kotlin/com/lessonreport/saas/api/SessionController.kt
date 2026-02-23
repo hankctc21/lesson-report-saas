@@ -4,6 +4,7 @@ import com.lessonreport.saas.domain.LessonSession
 import com.lessonreport.saas.domain.SessionType
 import com.lessonreport.saas.repository.ClientRepository
 import com.lessonreport.saas.repository.LessonSessionRepository
+import com.lessonreport.saas.repository.ReportRepository
 import com.lessonreport.saas.service.InstructorContext
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotNull
@@ -19,6 +20,7 @@ import java.util.UUID
 class SessionController(
     private val sessionRepository: LessonSessionRepository,
     private val clientRepository: ClientRepository,
+    private val reportRepository: ReportRepository,
     private val instructorContext: InstructorContext
 ) {
     @PostMapping
@@ -46,6 +48,22 @@ class SessionController(
             .map { it.toResponse() }
     }
 
+    @GetMapping("/with-report")
+    fun listByDateWithReport(@RequestParam date: LocalDate): List<SessionWithReportStatusResponse> {
+        val instructorId = instructorContext.currentInstructorId()
+        return sessionRepository.findByInstructorIdAndSessionDateOrderByCreatedAtDesc(instructorId, date)
+            .map {
+                SessionWithReportStatusResponse(
+                    id = it.id!!,
+                    clientId = it.client!!.id!!,
+                    date = it.sessionDate!!,
+                    type = it.sessionType!!,
+                    memo = it.memo,
+                    hasReport = reportRepository.findBySessionId(it.id!!) != null
+                )
+            }
+    }
+
     private fun LessonSession.toResponse() = SessionResponse(
         id = id!!,
         clientId = client!!.id!!,
@@ -68,4 +86,13 @@ data class SessionResponse(
     val date: LocalDate,
     val type: SessionType,
     val memo: String?
+)
+
+data class SessionWithReportStatusResponse(
+    val id: UUID,
+    val clientId: UUID,
+    val date: LocalDate,
+    val type: SessionType,
+    val memo: String?,
+    val hasReport: Boolean
 )

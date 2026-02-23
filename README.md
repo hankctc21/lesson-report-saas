@@ -39,13 +39,15 @@ docker compose down
 - Swagger UI: `http://localhost:18080/swagger-ui/index.html`
 
 ## 환경변수
-- `APP_AUTH_USERNAME` (default: `admin`)
-- `APP_AUTH_PASSWORD` (default: `change_this_in_prod`)
 - `APP_AUTH_SECRET` (default: `change-this-jwt-secret-min-32-bytes`)
 - `APP_AUTH_TOKEN_TTL_MINUTES` (default: `120`)
-- `APP_AUTH_INSTRUCTOR_ID` (default: `11111111-1111-1111-1111-111111111111`)
 - `APP_DEFAULT_INSTRUCTOR_ID` (default: `11111111-1111-1111-1111-111111111111`)
 - `APP_SHARE_BASE_URL` (default: `http://localhost:18080/api/v1/share`)
+
+로그인 계정은 DB(`auth_users`)에서 관리됩니다.
+기본 시드 계정:
+- username: `admin`
+- password: `change_this_in_prod`
 
 DB 연결(Spring datasource):
 - `SPRING_DATASOURCE_URL`
@@ -56,6 +58,17 @@ DB 연결(Spring datasource):
 ```bash
 ./gradlew clean test build
 ```
+
+## 프론트엔드 실행 (React + Vite)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+- 프론트 개발 서버: `http://localhost:5173`
+- 백엔드 API 기본 포트: `http://localhost:18080`
+- 필요 시 API 주소 변경: `frontend/.env`에 `VITE_API_BASE_URL=http://localhost:18080`
 
 ## 헬스 체크
 - `GET /actuator/health` (public)
@@ -115,6 +128,13 @@ curl -s http://localhost:18080/api/v1/clients \
 4. Swagger 우측 상단 `Authorize`에 `Bearer <토큰>` 입력
 5. `clients -> sessions -> reports -> share` 순서로 기능 테스트
 
+## 프론트 UX 보강 사항
+- 리포트 등록 시 `세션별 리포트 존재 여부`를 표시합니다.
+- 이미 리포트가 있는 세션은 기본적으로 선택 목록에서 제외됩니다.
+- `원클릭 초안` 버튼으로 리포트 문구를 자동 채울 수 있습니다.
+- 각 입력칸의 `음성` 버튼으로 브라우저 음성 인식 입력을 사용할 수 있습니다(지원 브라우저 한정).
+- 리포트 저장 성공 시 최신 `reportId`가 자동 표시되고 공유 대상에 자동 연결됩니다.
+
 ## MVP API
 - `GET /api/v1/clients`
 - `POST /api/v1/clients`
@@ -122,6 +142,7 @@ curl -s http://localhost:18080/api/v1/clients \
 - `PATCH /api/v1/clients/{clientId}`
 - `POST /api/v1/sessions`
 - `GET /api/v1/sessions?date=YYYY-MM-DD`
+- `GET /api/v1/sessions/with-report?date=YYYY-MM-DD`
 - `POST /api/v1/reports`
 - `GET /api/v1/reports/{reportId}`
 - `PATCH /api/v1/reports/{reportId}`
@@ -131,6 +152,8 @@ curl -s http://localhost:18080/api/v1/clients \
 
 ## 참고 사항
 - Flyway `V1`에서 기본 Instructor 1건을 시드 데이터로 생성합니다.
+- Flyway `V2`에서 로그인 계정(`auth_users`) 기본값 `admin / change_this_in_prod`를 시드합니다.
+- Flyway `V3`에서 데모 회원/세션/리포트 테스트 데이터를 시드합니다.
 - CI는 `main` 브랜치 Push/PR 시 자동 실행됩니다.
 - 운영 환경에서는 현재 단일 계정 JWT 부트스트랩에서 사용자/권한 기반 JWT(OAuth2/OIDC 포함)로 확장하는 것을 권장합니다.
 

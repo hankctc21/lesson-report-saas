@@ -57,6 +57,17 @@
 - 헬스체크 확인
   - `GET /actuator/health` -> `200`, `status: UP`
 
+## Verification Notes (2026-02-23)
+
+- 인증을 DB 기반으로 전환
+  - `auth_users` 테이블 시드 계정으로 로그인 토큰 발급 확인
+- 프론트 UX 보강
+  - 세션별 리포트 존재 여부 표시 및 중복 세션 선택 방지 확인
+  - 원클릭 리포트 초안 버튼 동작 확인
+  - 음성 입력(Web Speech API) 이벤트 바인딩 확인
+- 데모 데이터 시드
+  - Flyway `V3`로 회원/세션/리포트 샘플 데이터 제공
+
 ## Commit Message Guideline (Recommended)
 
 - 형식: `type: short summary`

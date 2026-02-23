@@ -1,22 +1,23 @@
 package com.lessonreport.saas.auth
 
 import org.springframework.stereotype.Service
+import com.lessonreport.saas.repository.AuthUserRepository
 
 @Service
 class AuthService(
-    private val appAuthProperties: AppAuthProperties
+    private val authUserRepository: AuthUserRepository
 ) {
     fun authenticate(username: String, password: String): AuthPrincipal? {
-        if (username != appAuthProperties.username) {
-            return null
-        }
-        if (password != appAuthProperties.password) {
+        val authUser = authUserRepository.findByUsername(username.trim())
+            ?: return null
+
+        if (password != authUser.password) {
             return null
         }
 
         return AuthPrincipal(
-            username = username,
-            instructorId = appAuthProperties.instructorId
+            username = authUser.username!!,
+            instructorId = authUser.instructor!!.id!!
         )
     }
 }
