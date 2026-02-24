@@ -1,0 +1,21 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Backend IntelliJ (Spring Boot)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="lesson-report-saas" />
+    <option name="MAIN_CLASS_NAME" value="com.lessonreport.saas.LessonReportSaasApplication" />
+    <option name="ACTIVE_PROFILES" value="" />
+    <option name="SHORTEN_COMMAND_LINE" value="MANIFEST" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+    <option name="PASS_PARENT_ENVS" value="true" />
+    <envs>
+      <env name="SPRING_DATASOURCE_URL" value="jdbc:postgresql://localhost:5432/lesson_report" />
+      <env name="SPRING_DATASOURCE_USERNAME" value="lesson_report" />
+      <env name="SPRING_DATASOURCE_PASSWORD" value="change_me" />
+      <env name="SERVER_PORT" value="18080" />
+      <env name="APP_AUTH_SECRET" value="change-this-jwt-secret-min-32-bytes" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
+

@@ -56,3 +56,19 @@ body {
 .animate-rise {
   animation: rise 0.45s ease-out;
 }
+
+@keyframes guide-blink {
+  0%,
+  100% {
+    background-color: #fff9c4;
+    box-shadow: 0 0 0 2px #ffe047;
+  }
+  50% {
+    background-color: #fff36a;
+    box-shadow: 0 0 0 2px #ffd400, 0 0 14px #ffe047dd;
+  }
+}
+
+.blink-guide-wrap {
+  animation: guide-blink 0.55s linear infinite;
+}

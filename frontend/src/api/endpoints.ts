@@ -3,6 +3,7 @@ import type {
   Center,
   Client,
   ClientProfile,
+  ClientTrackingLog,
   ClientProgressPhoto,
   GroupSequenceTemplate,
   GroupSequence,
@@ -47,7 +48,18 @@ export const createClient = async (payload: { name: string; centerId?: string; p
   return data;
 };
 
-export const updateClient = async (clientId: string, payload: { name?: string; centerId?: string; phone?: string; flagsNote?: string; note?: string }) => {
+export const updateClient = async (
+  clientId: string,
+  payload: {
+    name?: string;
+    centerId?: string;
+    phone?: string;
+    flagsNote?: string;
+    note?: string;
+    preferredLessonType?: "PERSONAL" | "GROUP";
+    memberStatus?: "CURRENT" | "PAUSED" | "FORMER";
+  }
+) => {
   const { data } = await api.patch<Client>(`/api/v1/clients/${clientId}`, payload);
   return data;
 };
@@ -82,6 +94,28 @@ export const createClientHomework = async (clientId: string, payload: { content:
   return data;
 };
 
+export const listClientTrackingLogs = async (clientId: string) => {
+  const { data } = await api.get<ClientTrackingLog[]>(`/api/v1/clients/${clientId}/tracking-logs`);
+  return data;
+};
+
+export const createClientTrackingLog = async (
+  clientId: string,
+  payload: {
+    painNote?: string;
+    goalNote?: string;
+    surgeryHistory?: string;
+    beforeClassMemo?: string;
+    afterClassMemo?: string;
+    nextLessonPlan?: string;
+    homeworkGiven?: string;
+    homeworkReminderAt?: string;
+  }
+) => {
+  const { data } = await api.post<ClientTrackingLog>(`/api/v1/clients/${clientId}/tracking-logs`, payload);
+  return data;
+};
+
 export const listGroupSequences = async (centerId: string, lessonType?: "PERSONAL" | "GROUP") => {
   const q = lessonType ? `&lessonType=${lessonType}` : "";
   const { data } = await api.get<GroupSequence[]>(`/api/v1/group-sequences?centerId=${centerId}${q}`);
@@ -103,6 +137,23 @@ export const createGroupSequence = async (payload: {
   memberNotes?: string;
 }) => {
   const { data } = await api.post<GroupSequence>("/api/v1/group-sequences", payload);
+  return data;
+};
+
+export const updateGroupSequence = async (
+  sequenceId: string,
+  payload: {
+    equipmentType?: string;
+    equipmentBrand?: string;
+    springSetting?: string;
+    todaySequence?: string;
+    nextSequence?: string;
+    beforeMemo?: string;
+    afterMemo?: string;
+    memberNotes?: string;
+  }
+) => {
+  const { data } = await api.patch<GroupSequence>(`/api/v1/group-sequences/${sequenceId}`, payload);
   return data;
 };
 
@@ -142,6 +193,19 @@ export const uploadClientProgressPhoto = async (
     headers: { "Content-Type": "multipart/form-data" }
   });
   return data;
+};
+
+export const updateClientProgressPhoto = async (
+  clientId: string,
+  photoId: string,
+  payload: { phase?: "BEFORE" | "AFTER" | "ETC"; note?: string; takenOn?: string }
+) => {
+  const { data } = await api.patch<ClientProgressPhoto>(`/api/v1/clients/${clientId}/progress-photos/${photoId}`, payload);
+  return data;
+};
+
+export const deleteClientProgressPhoto = async (clientId: string, photoId: string) => {
+  await api.delete(`/api/v1/clients/${clientId}/progress-photos/${photoId}`);
 };
 
 export const createSession = async (payload: { clientId: string; date: string; type: "PERSONAL" | "GROUP"; memo?: string; startTime?: string }) => {

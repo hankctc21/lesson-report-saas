@@ -11,6 +11,8 @@ import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -70,6 +72,24 @@ class GroupSequenceController(
         return groupSequenceLogRepository.save(row).toResponse()
     }
 
+    @PatchMapping("/{sequenceId}")
+    fun update(@PathVariable sequenceId: UUID, @Valid @RequestBody request: GroupSequenceUpdateRequest): GroupSequenceResponse {
+        val instructorId = instructorContext.currentInstructorId()
+        val row = groupSequenceLogRepository.findByIdAndInstructorId(sequenceId, instructorId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Sequence not found")
+
+        row.equipmentType = request.equipmentType ?: row.equipmentType
+        row.equipmentBrand = request.equipmentBrand ?: row.equipmentBrand
+        row.springSetting = request.springSetting ?: row.springSetting
+        row.todaySequence = request.todaySequence ?: row.todaySequence
+        row.nextSequence = request.nextSequence ?: row.nextSequence
+        row.beforeMemo = request.beforeMemo ?: row.beforeMemo
+        row.afterMemo = request.afterMemo ?: row.afterMemo
+        row.memberNotes = request.memberNotes ?: row.memberNotes
+
+        return groupSequenceLogRepository.save(row).toResponse()
+    }
+
     private fun ensureOwnedCenter(centerId: UUID, instructorId: UUID) =
         centerRepository.findByIdAndInstructorId(centerId, instructorId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Center not found")
@@ -124,4 +144,15 @@ data class GroupSequenceResponse(
     val afterMemo: String?,
     val memberNotes: String?,
     val createdAt: Instant
+)
+
+data class GroupSequenceUpdateRequest(
+    @field:Size(max = 40) val equipmentType: String? = null,
+    @field:Size(max = 120) val equipmentBrand: String? = null,
+    @field:Size(max = 500) val springSetting: String? = null,
+    @field:Size(max = 2000) val todaySequence: String? = null,
+    @field:Size(max = 2000) val nextSequence: String? = null,
+    @field:Size(max = 1000) val beforeMemo: String? = null,
+    @field:Size(max = 1000) val afterMemo: String? = null,
+    @field:Size(max = 2000) val memberNotes: String? = null
 )

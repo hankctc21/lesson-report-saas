@@ -79,7 +79,9 @@ class ReportPhotoController(
         val instructorId = instructorContext.currentInstructorId()
         val report = reportRepository.findByIdAndInstructorId(reportId, instructorId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Report not found")
-        return reportPhotoRepository.findByReportIdOrderByCreatedAtDesc(report.id!!).map { it.toResponse(report.id!!) }
+        return reportPhotoRepository.findByReportIdOrderByCreatedAtDesc(report.id!!)
+            .filter { fileExists(it.storagePath) }
+            .map { it.toResponse(report.id!!) }
     }
 
     @GetMapping("/reports/{reportId}/photos/{photoId}")
@@ -116,6 +118,11 @@ class ReportPhotoController(
             .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"${photo.fileName}\"")
             .contentType(MediaType.parseMediaType(photo.contentType ?: "image/jpeg"))
             .body(bytes)
+    }
+
+    private fun fileExists(path: String?): Boolean {
+        val p = runCatching { Paths.get(path ?: "") }.getOrNull() ?: return false
+        return Files.exists(p)
     }
 
     private fun inferExtension(contentType: String): String = when {

@@ -11,6 +11,8 @@ export type Client = {
   phone?: string;
   flagsNote?: string;
   note?: string;
+  preferredLessonType?: "PERSONAL" | "GROUP";
+  memberStatus?: "CURRENT" | "PAUSED" | "FORMER";
   createdAt: string;
 };
 
@@ -38,6 +40,19 @@ export type Homework = {
   remindAt?: string;
   notifiedAt?: string;
   completed: boolean;
+  createdAt: string;
+};
+
+export type ClientTrackingLog = {
+  id: string;
+  painNote?: string;
+  goalNote?: string;
+  surgeryHistory?: string;
+  beforeClassMemo?: string;
+  afterClassMemo?: string;
+  nextLessonPlan?: string;
+  homeworkGiven?: string;
+  homeworkReminderAt?: string;
   createdAt: string;
 };
 

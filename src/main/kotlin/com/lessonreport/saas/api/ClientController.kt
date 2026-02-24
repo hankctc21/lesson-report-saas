@@ -1,6 +1,7 @@
 package com.lessonreport.saas.api
 
 import com.lessonreport.saas.domain.Client
+import com.lessonreport.saas.domain.SessionType
 import com.lessonreport.saas.repository.CenterRepository
 import com.lessonreport.saas.repository.ClientRepository
 import com.lessonreport.saas.service.InstructorContext
@@ -40,7 +41,9 @@ class ClientController(
             name = requireName(request.name),
             phone = request.phone,
             flagsNote = request.flagsNote,
-            note = request.note
+            note = request.note,
+            preferredLessonType = request.preferredLessonType,
+            memberStatus = request.memberStatus ?: "CURRENT"
         )
         return clientRepository.save(client).toResponse()
     }
@@ -57,6 +60,8 @@ class ClientController(
         request.phone?.let { client.phone = it }
         request.flagsNote?.let { client.flagsNote = it }
         request.note?.let { client.note = it }
+        request.preferredLessonType?.let { client.preferredLessonType = it }
+        request.memberStatus?.let { client.memberStatus = it }
 
         return clientRepository.save(client).toResponse()
     }
@@ -85,6 +90,8 @@ class ClientController(
         phone = phone,
         flagsNote = flagsNote,
         note = note,
+        preferredLessonType = preferredLessonType?.name,
+        memberStatus = memberStatus,
         createdAt = createdAt ?: Instant.now()
     )
 }
@@ -94,7 +101,9 @@ data class ClientCreateRequest(
     val centerId: UUID? = null,
     @field:Size(max = 40) val phone: String? = null,
     @field:Size(max = 500) val flagsNote: String? = null,
-    @field:Size(max = 1000) val note: String? = null
+    @field:Size(max = 1000) val note: String? = null,
+    val preferredLessonType: SessionType? = null,
+    @field:Size(max = 20) val memberStatus: String? = null
 )
 
 data class ClientUpdateRequest(
@@ -102,7 +111,9 @@ data class ClientUpdateRequest(
     val centerId: UUID? = null,
     @field:Size(max = 40) val phone: String? = null,
     @field:Size(max = 500) val flagsNote: String? = null,
-    @field:Size(max = 1000) val note: String? = null
+    @field:Size(max = 1000) val note: String? = null,
+    val preferredLessonType: SessionType? = null,
+    @field:Size(max = 20) val memberStatus: String? = null
 )
 
 data class ClientResponse(
@@ -112,5 +123,7 @@ data class ClientResponse(
     val phone: String?,
     val flagsNote: String?,
     val note: String?,
+    val preferredLessonType: String?,
+    val memberStatus: String,
     val createdAt: Instant
 )

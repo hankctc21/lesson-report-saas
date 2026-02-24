@@ -9,6 +9,8 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import org.hibernate.annotations.CreationTimestamp
 import org.hibernate.annotations.UpdateTimestamp
 import java.time.Instant
@@ -40,6 +42,13 @@ open class Client(
 
     @Column(length = 1000)
     open var note: String? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "preferred_lesson_type", length = 20)
+    open var preferredLessonType: SessionType? = null,
+
+    @Column(name = "member_status", nullable = false, length = 20)
+    open var memberStatus: String = "CURRENT",
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

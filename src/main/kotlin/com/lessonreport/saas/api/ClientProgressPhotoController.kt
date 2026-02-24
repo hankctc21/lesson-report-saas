@@ -12,9 +12,12 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RequestPart
@@ -46,6 +49,7 @@ class ClientProgressPhotoController(
         val instructorId = instructorContext.currentInstructorId()
         val client = findOwnedClient(clientId, instructorId)
         return clientProgressPhotoRepository.findByClientIdAndInstructorIdOrderByCreatedAtDesc(client.id!!, instructorId)
+            .filter { fileExists(it.storagePath) }
             .map { it.toResponse() }
     }
 
@@ -112,6 +116,40 @@ class ClientProgressPhotoController(
         return openImage(photo)
     }
 
+    @PatchMapping("/clients/{clientId}/progress-photos/{photoId}")
+    fun update(
+        @PathVariable clientId: UUID,
+        @PathVariable photoId: UUID,
+        @RequestBody request: ClientProgressPhotoUpdateRequest
+    ): ClientProgressPhotoResponse {
+        val instructorId = instructorContext.currentInstructorId()
+        findOwnedClient(clientId, instructorId)
+        val photo = clientProgressPhotoRepository.findByIdAndClientId(photoId, clientId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Photo not found")
+
+        request.phase?.let { photo.phase = it }
+        if (request.note != null) photo.note = request.note
+        if (request.takenOn != null) photo.takenOn = request.takenOn
+
+        return clientProgressPhotoRepository.save(photo).toResponse()
+    }
+
+    @DeleteMapping("/clients/{clientId}/progress-photos/{photoId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun delete(@PathVariable clientId: UUID, @PathVariable photoId: UUID) {
+        val instructorId = instructorContext.currentInstructorId()
+        findOwnedClient(clientId, instructorId)
+        val photo = clientProgressPhotoRepository.findByIdAndClientId(photoId, clientId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Photo not found")
+
+        val filePath = runCatching { Paths.get(photo.storagePath ?: "") }.getOrNull()
+        if (filePath != null && Files.exists(filePath)) {
+            Files.deleteIfExists(filePath)
+        }
+
+        clientProgressPhotoRepository.delete(photo)
+    }
+
     private fun findOwnedClient(clientId: UUID, instructorId: UUID) =
         clientRepository.findByIdAndInstructorId(clientId, instructorId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Client not found")
@@ -124,6 +162,11 @@ class ClientProgressPhotoController(
             .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"${photo.fileName}\"")
             .contentType(MediaType.parseMediaType(photo.contentType ?: "image/jpeg"))
             .body(bytes)
+    }
+
+    private fun fileExists(path: String?): Boolean {
+        val p = runCatching { Paths.get(path ?: "") }.getOrNull() ?: return false
+        return Files.exists(p)
     }
 
     private fun inferExtension(contentType: String): String = when {
@@ -154,4 +197,11 @@ data class ClientProgressPhotoResponse(
     val fileName: String,
     val imageUrl: String,
     val createdAt: Instant
+)
+
+data class ClientProgressPhotoUpdateRequest(
+    val phase: ProgressPhotoPhase? = null,
+    val note: String? = null,
+    @field:DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    val takenOn: LocalDate? = null
 )

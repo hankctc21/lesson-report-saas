@@ -4,8 +4,11 @@ import {
   createCenter,
   createClient,
   createClientHomework,
+  createClientTrackingLog,
+  deleteClientProgressPhoto,
   createGroupSequenceTemplate,
   createGroupSequence,
+  updateGroupSequence,
   createReport,
   createSession,
   createShare,
@@ -13,6 +16,7 @@ import {
   health,
   listCenters,
   listClientHomeworks,
+  listClientTrackingLogs,
   listClientProgressPhotos,
   listClientReports,
   listClients,
@@ -21,6 +25,7 @@ import {
   listReportPhotos,
   listSessionsWithReportByDate,
   uploadClientProgressPhoto,
+  updateClientProgressPhoto,
   uploadReportPhoto,
   upsertClientProfile,
   updateClient,
@@ -41,6 +46,19 @@ type ClientEditDraft = {
   phone: string;
   flagsNote: string;
   note: string;
+  preferredLessonType: "" | "PERSONAL" | "GROUP";
+  memberStatus: "CURRENT" | "PAUSED" | "FORMER";
+};
+
+type SequenceEditDraft = {
+  equipmentType: string;
+  equipmentBrand: string;
+  springSetting: string;
+  todaySequence: string;
+  nextSequence: string;
+  beforeMemo: string;
+  afterMemo: string;
+  memberNotes: string;
 };
 
 type BrowserSpeechRecognition = SpeechRecognition & {
@@ -123,6 +141,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [selectedCenterId, setSelectedCenterId] = useState<string>("");
   const [newCenterName, setNewCenterName] = useState("");
   const [lessonTypeFilter, setLessonTypeFilter] = useState<"ALL" | "PERSONAL" | "GROUP">("ALL");
+  const [memberStatusFilter, setMemberStatusFilter] = useState<"ALL" | "CURRENT" | "PAUSED" | "FORMER">("ALL");
   const [sessionStartHour, setSessionStartHour] = useState("");
   const [sessionStartMinute, setSessionStartMinute] = useState("00");
   const [showReportedSession, setShowReportedSession] = useState(false);
@@ -132,6 +151,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [activeWorkPane, setActiveWorkPane] = useState<"sequence" | "report">("sequence");
   const [showMemberEditForm, setShowMemberEditForm] = useState(false);
   const [showReportEditForm, setShowReportEditForm] = useState(false);
+  const [showSequenceEditForm, setShowSequenceEditForm] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
   const [sharePublicUrl, setSharePublicUrl] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
@@ -141,18 +161,51 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [lastSavedSessionId, setLastSavedSessionId] = useState("");
   const [suppressHasReportWarning, setSuppressHasReportWarning] = useState(false);
   const [draft, setDraft] = useState<ReportDraft>(EMPTY_DRAFT);
-  const [clientEditDraft, setClientEditDraft] = useState<ClientEditDraft>({ name: "", centerId: "", phone: "", flagsNote: "", note: "" });
+  const [clientEditDraft, setClientEditDraft] = useState<ClientEditDraft>({
+    name: "",
+    centerId: "",
+    phone: "",
+    flagsNote: "",
+    note: "",
+    preferredLessonType: "",
+    memberStatus: "CURRENT"
+  });
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
+  const [lastSelectedClientIndex, setLastSelectedClientIndex] = useState<number | null>(null);
+  const [bulkCenterId, setBulkCenterId] = useState("");
+  const [bulkLessonType, setBulkLessonType] = useState<"" | "PERSONAL" | "GROUP">("");
   const [reportEditDraft, setReportEditDraft] = useState<ReportDraft>(EMPTY_DRAFT);
   const [activeVoiceField, setActiveVoiceField] = useState<keyof ReportDraft | null>(null);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState("");
   const [selectedSequenceDetail, setSelectedSequenceDetail] = useState<GroupSequenceLog | null>(null);
   const [pendingReportPhotoFile, setPendingReportPhotoFile] = useState<File | null>(null);
+  const [sequenceEditDraft, setSequenceEditDraft] = useState<SequenceEditDraft>({
+    equipmentType: "",
+    equipmentBrand: "",
+    springSetting: "",
+    todaySequence: "",
+    nextSequence: "",
+    beforeMemo: "",
+    afterMemo: "",
+    memberNotes: ""
+  });
   const [sequenceLoadBackup, setSequenceLoadBackup] = useState<Pick<GroupSequenceLog, "equipmentType" | "equipmentBrand" | "springSetting" | "todaySequence" | "nextSequence"> | null>(null);
   const [flashReportSessionId, setFlashReportSessionId] = useState("");
   const [flashSequenceSessionId, setFlashSequenceSessionId] = useState("");
+  const [flashNewSessionActionId, setFlashNewSessionActionId] = useState("");
   const [progressPhotoPhase, setProgressPhotoPhase] = useState<"BEFORE" | "AFTER" | "ETC">("ETC");
   const [progressPhotoNote, setProgressPhotoNote] = useState("");
   const [progressPhotoTakenOn, setProgressPhotoTakenOn] = useState(today);
+  const [pendingClientProgressPhotoFile, setPendingClientProgressPhotoFile] = useState<File | null>(null);
+  const [clientProgressPhotoInputKey, setClientProgressPhotoInputKey] = useState(0);
+  const [progressPhotoPickerBusy, setProgressPhotoPickerBusy] = useState(false);
+  const [editingProgressPhotoId, setEditingProgressPhotoId] = useState("");
+  const [progressPhotoEditPhase, setProgressPhotoEditPhase] = useState<"BEFORE" | "AFTER" | "ETC">("ETC");
+  const [progressPhotoEditNote, setProgressPhotoEditNote] = useState("");
+  const [progressPhotoEditTakenOn, setProgressPhotoEditTakenOn] = useState("");
+  const [selectedHistoryKey, setSelectedHistoryKey] = useState("");
+  const [showProgressPhotoUploadModal, setShowProgressPhotoUploadModal] = useState(false);
   const [photoObjectUrls, setPhotoObjectUrls] = useState<Record<string, string>>({});
   const [clientProgressPhotoUrls, setClientProgressPhotoUrls] = useState<Record<string, string>>({});
   const [personalMetaDraft, setPersonalMetaDraft] = useState<PersonalMeta>(PERSONAL_META_EMPTY);
@@ -177,10 +230,12 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [sequenceBrandMode, setSequenceBrandMode] = useState<"preset" | "custom">("preset");
   const [sequenceSpringMode, setSequenceSpringMode] = useState<"preset" | "custom">("preset");
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
 
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: health, refetchInterval: 15000 });
   const centersQuery = useQuery({ queryKey: ["centers"], queryFn: listCenters });
-  const clientsQuery = useQuery({ queryKey: ["clients", selectedCenterId], queryFn: () => listClients(selectedCenterId || undefined), enabled: !!selectedCenterId });
+  const clientsQuery = useQuery({ queryKey: ["clients", selectedCenterId], queryFn: () => listClients(selectedCenterId || undefined) });
   const sessionsQuery = useQuery({
     queryKey: ["sessions-with-report", sessionDate],
     queryFn: () => listSessionsWithReportByDate(sessionDate)
@@ -205,10 +260,22 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     queryFn: () => listClientHomeworks(selectedMemberId),
     enabled: !!selectedMemberId
   });
+  const clientTrackingLogsQuery = useQuery({
+    queryKey: ["client-tracking-logs", selectedMemberId],
+    queryFn: () => listClientTrackingLogs(selectedMemberId),
+    enabled: !!selectedMemberId
+  });
   const groupSequencesQuery = useQuery({
-    queryKey: ["group-sequences", selectedCenterId, lessonTypeFilter],
-    queryFn: () => listGroupSequences(selectedCenterId, lessonTypeFilter === "ALL" ? undefined : lessonTypeFilter),
-    enabled: !!selectedCenterId
+    queryKey: ["group-sequences", selectedCenterId, lessonTypeFilter, (centersQuery.data || []).map((c) => c.id).join(",")],
+    queryFn: async () => {
+      const type = lessonTypeFilter === "ALL" ? undefined : lessonTypeFilter;
+      if (selectedCenterId) return listGroupSequences(selectedCenterId, type);
+      const allCenters = centersQuery.data || [];
+      if (!allCenters.length) return [];
+      const allResults = await Promise.all(allCenters.map((c) => listGroupSequences(c.id, type)));
+      return allResults.flat();
+    },
+    enabled: !!(centersQuery.data || []).length
   });
   const groupSequenceTemplatesQuery = useQuery({
     queryKey: ["group-sequence-templates", selectedCenterId, groupDraft.lessonType],
@@ -222,6 +289,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   });
 
   const centers = useMemo(() => centersQuery.data || [], [centersQuery.data]);
+  const centerTabs = useMemo(() => [...centers].sort((a, b) => a.name.localeCompare(b.name, "ko")), [centers]);
   const clients = useMemo(() => clientsQuery.data || [], [clientsQuery.data]);
   const selectedCenter = useMemo(
     () => centers.find((c) => c.id === selectedCenterId) || centers[0] || null,
@@ -229,10 +297,11 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   );
   const filteredClients = useMemo(() => {
     const q = memberSearch.trim().toLowerCase();
-    const base = clients;
+    const base = memberStatusFilter === "ALL" ? clients : clients.filter((c) => (c.memberStatus || "CURRENT") === memberStatusFilter);
     if (!q) return base;
     return base.filter((c) => c.name.toLowerCase().includes(q) || (c.phone || "").includes(q));
-  }, [clients, memberSearch]);
+  }, [clients, memberSearch, memberStatusFilter]);
+  const selectedClientIdSet = useMemo(() => new Set(selectedClientIds), [selectedClientIds]);
   const memberListRowHeight = 40;
   const memberListMaxVisible = 6;
   const memberListHeight = Math.min(filteredClients.length, memberListMaxVisible) * memberListRowHeight || memberListRowHeight;
@@ -279,6 +348,41 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     () => Object.fromEntries((groupSequencesQuery.data || []).filter((g) => !!g.sessionId).map((g) => [g.sessionId as string, g])),
     [groupSequencesQuery.data]
   );
+  const beforeProgressPhotos = useMemo(
+    () => (clientProgressPhotosQuery.data || []).filter((p) => p.phase === "BEFORE"),
+    [clientProgressPhotosQuery.data]
+  );
+  const afterProgressPhotos = useMemo(
+    () => (clientProgressPhotosQuery.data || []).filter((p) => p.phase === "AFTER"),
+    [clientProgressPhotosQuery.data]
+  );
+  const etcProgressPhotos = useMemo(
+    () => (clientProgressPhotosQuery.data || []).filter((p) => p.phase !== "BEFORE" && p.phase !== "AFTER"),
+    [clientProgressPhotosQuery.data]
+  );
+  const historyEntries = useMemo(() => {
+    const tracking = (clientTrackingLogsQuery.data || []).map((log) => ({
+      key: `tracking:${log.id}`,
+      kind: "tracking" as const,
+      createdAt: log.createdAt,
+      title: "회원 추적",
+      summary: `${log.painNote || "-"} / ${log.goalNote || "-"}`,
+      detail: log
+    }));
+    const homework = (clientHomeworksQuery.data || []).map((h) => ({
+      key: `homework:${h.id}`,
+      kind: "homework" as const,
+      createdAt: h.createdAt,
+      title: "숙제",
+      summary: h.content || "-",
+      detail: h
+    }));
+    return [...tracking, ...homework].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }, [clientTrackingLogsQuery.data, clientHomeworksQuery.data]);
+  const selectedHistoryEntry = useMemo(
+    () => historyEntries.find((x) => x.key === selectedHistoryKey) || null,
+    [historyEntries, selectedHistoryKey]
+  );
   const sequenceBrandOptions = useMemo(() => {
     const fromLogs = (groupSequencesQuery.data || []).map((g) => (g.equipmentBrand || "").trim()).filter(Boolean);
     return Array.from(new Set([...DEFAULT_BRANDS, ...fromLogs]));
@@ -321,6 +425,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const isCustomEquipment = isCustomEquipmentInput;
   const equipmentSelectValue = isCustomEquipmentInput ? CUSTOM_TEXT : selectedEquipmentMeta ? selectedEquipmentMeta.value : "";
   const shouldShowSpringSetting = selectedEquipmentMeta ? selectedEquipmentMeta.hasSpring : isCustomEquipment ? customEquipmentHasSpring : false;
+  const timelineScrollTargetId = flashReportSessionId || flashSequenceSessionId || flashNewSessionActionId || selectedTimelineSessionId;
 
   const createClientMutation = useMutation({
     mutationFn: createClient,
@@ -357,12 +462,27 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       setPendingSessionAutoSelectId(data.id);
       setSelectedMemberId(data.clientId);
       setNewSessionCue(true);
-      setNotice("세션 생성 완료. 아래 리포트 작성으로 이어서 진행하세요.");
+      setFlashNewSessionActionId(data.id);
+      setNotice("세션 생성 완료. 세션 타임라인에서 시퀀스/리포트 기록을 이어서 진행하세요.");
     }
   });
 
   const updateClientMutation = useMutation({
-    mutationFn: ({ clientId, payload }: { clientId: string; payload: { name?: string; centerId?: string; phone?: string; flagsNote?: string; note?: string } }) =>
+    mutationFn: ({
+      clientId,
+      payload
+    }: {
+      clientId: string;
+      payload: {
+        name?: string;
+        centerId?: string;
+        phone?: string;
+        flagsNote?: string;
+        note?: string;
+        preferredLessonType?: "PERSONAL" | "GROUP";
+        memberStatus?: "CURRENT" | "PAUSED" | "FORMER";
+      };
+    }) =>
       updateClient(clientId, payload),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["clients", selectedCenterId] });
@@ -372,6 +492,29 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       setSelectedMemberId(data.id);
       setShowMemberEditForm(false);
       setNotice("회원 정보(센터 포함)가 수정되었습니다.");
+    }
+  });
+  const bulkClientUpdateMutation = useMutation({
+    mutationFn: async (payload: { centerId?: string; preferredLessonType?: "PERSONAL" | "GROUP" }) => {
+      const ids = selectedClientIds;
+      if (!ids.length) return [];
+      return Promise.all(
+        ids.map((id) =>
+          updateClient(id, {
+            centerId: payload.centerId || undefined,
+            preferredLessonType: payload.preferredLessonType || undefined
+          })
+        )
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clients", selectedCenterId] });
+      setNotice(`선택 회원 ${selectedClientIds.length}명 일괄 변경 완료.`);
+      setSelectionMode(false);
+      setSelectedClientIds([]);
+      setLastSelectedClientIndex(null);
+      setBulkCenterId("");
+      setBulkLessonType("");
     }
   });
 
@@ -388,6 +531,8 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       qc.invalidateQueries({ queryKey: ["sessions-with-report", sessionDate] });
       qc.refetchQueries({ queryKey: ["reports", data.clientId] });
       setSelectedReportId(data.id);
+      setSelectedTimelineSessionId(data.sessionId);
+      setSelectedSessionId(data.sessionId);
       setDetailPanelMode("report");
       setLastSavedSessionId(data.sessionId);
       setSuppressHasReportWarning(true);
@@ -412,6 +557,8 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["reports", data.clientId] });
       setSelectedReportId(data.id);
+      setSelectedTimelineSessionId(data.sessionId);
+      setFlashReportSessionId(data.sessionId);
       setShowReportEditForm(false);
       setNotice("리포트가 수정되었습니다.");
     }
@@ -427,9 +574,15 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   });
   const uploadPhotoMutation = useMutation({
     mutationFn: ({ reportId, file }: { reportId: string; file: File }) => uploadReportPhoto(reportId, file),
+    onMutate: () => {
+      setNotice("사진 업로드 중...");
+    },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["report-photos", vars.reportId] });
       setNotice("사진이 업로드되었습니다.");
+    },
+    onError: () => {
+      setNotice("사진 업로드 중 오류가 발생했습니다.");
     }
   });
   const upsertClientProfileMutation = useMutation({
@@ -446,6 +599,27 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       qc.invalidateQueries({ queryKey: ["client-homeworks", selectedMemberId] });
     }
   });
+  const createTrackingLogMutation = useMutation({
+    mutationFn: ({
+      clientId,
+      payload
+    }: {
+      clientId: string;
+      payload: {
+        painNote?: string;
+        goalNote?: string;
+        surgeryHistory?: string;
+        beforeClassMemo?: string;
+        afterClassMemo?: string;
+        nextLessonPlan?: string;
+        homeworkGiven?: string;
+        homeworkReminderAt?: string;
+      };
+    }) => createClientTrackingLog(clientId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["client-tracking-logs", selectedMemberId] });
+    }
+  });
   const createGroupSequenceMutation = useMutation({
     mutationFn: createGroupSequence,
     onSuccess: (data) => {
@@ -460,6 +634,29 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       setActiveLessonForm(null);
       setSequenceLoadBackup(null);
       setNotice("시퀀스를 저장했습니다.");
+    }
+  });
+  const updateGroupSequenceMutation = useMutation({
+    mutationFn: ({ sequenceId, payload }: { sequenceId: string; payload: SequenceEditDraft }) =>
+      updateGroupSequence(sequenceId, {
+        equipmentType: payload.equipmentType || undefined,
+        equipmentBrand: payload.equipmentBrand || undefined,
+        springSetting: payload.springSetting || undefined,
+        todaySequence: payload.todaySequence || undefined,
+        nextSequence: payload.nextSequence || undefined,
+        beforeMemo: payload.beforeMemo || undefined,
+        afterMemo: payload.afterMemo || undefined,
+        memberNotes: payload.memberNotes || undefined
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["group-sequences", selectedCenterId], exact: false });
+      setSelectedSequenceDetail(data as GroupSequenceLog);
+      setShowSequenceEditForm(false);
+      if (data.sessionId) {
+        setFlashSequenceSessionId(data.sessionId);
+        setSelectedTimelineSessionId(data.sessionId);
+      }
+      setNotice("시퀀스를 수정했습니다.");
     }
   });
   const createGroupSequenceTemplateMutation = useMutation({
@@ -484,9 +681,47 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       note?: string;
       takenOn?: string;
     }) => uploadClientProgressPhoto(clientId, file, { phase, note, takenOn }),
+    onMutate: () => {
+      setNotice("비포/애프터 사진 업로드 중...");
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["client-progress-photos", selectedMemberId] });
+      setPendingClientProgressPhotoFile(null);
+      setClientProgressPhotoInputKey((k) => k + 1);
+      setShowProgressPhotoUploadModal(false);
       setNotice("비포/애프터 사진을 저장했습니다.");
+    },
+    onError: () => {
+      setNotice("비포/애프터 사진 업로드 중 오류가 발생했습니다.");
+    }
+  });
+  const updateClientProgressPhotoMutation = useMutation({
+    mutationFn: ({
+      clientId,
+      photoId,
+      payload
+    }: {
+      clientId: string;
+      photoId: string;
+      payload: { phase?: "BEFORE" | "AFTER" | "ETC"; note?: string; takenOn?: string };
+    }) => updateClientProgressPhoto(clientId, photoId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["client-progress-photos", selectedMemberId] });
+      setEditingProgressPhotoId("");
+      setNotice("사진 정보를 수정했습니다.");
+    },
+    onError: () => {
+      setNotice("사진 수정 중 오류가 발생했습니다.");
+    }
+  });
+  const deleteClientProgressPhotoMutation = useMutation({
+    mutationFn: ({ clientId, photoId }: { clientId: string; photoId: string }) => deleteClientProgressPhoto(clientId, photoId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["client-progress-photos", selectedMemberId] });
+      setNotice("사진을 삭제했습니다.");
+    },
+    onError: () => {
+      setNotice("사진 삭제 중 오류가 발생했습니다.");
     }
   });
 
@@ -498,15 +733,21 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!flashReportSessionId) return;
-    const t = setTimeout(() => setFlashReportSessionId(""), 1800);
+    const t = setTimeout(() => setFlashReportSessionId(""), 2400);
     return () => clearTimeout(t);
   }, [flashReportSessionId]);
 
   useEffect(() => {
     if (!flashSequenceSessionId) return;
-    const t = setTimeout(() => setFlashSequenceSessionId(""), 1800);
+    const t = setTimeout(() => setFlashSequenceSessionId(""), 2400);
     return () => clearTimeout(t);
   }, [flashSequenceSessionId]);
+
+  useEffect(() => {
+    if (!flashNewSessionActionId) return;
+    const t = setTimeout(() => setFlashNewSessionActionId(""), 2800);
+    return () => clearTimeout(t);
+  }, [flashNewSessionActionId]);
 
   useEffect(() => {
     if (copyState === "idle") return;
@@ -532,6 +773,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     if (!created) return;
     setSelectedMemberId(created.clientId);
     setSelectedSessionId(created.id);
+    setSelectedTimelineSessionId(created.id);
     setSuppressHasReportWarning(false);
     setPendingSessionAutoSelectId("");
   }, [pendingSessionAutoSelectId, sessionsQuery.data]);
@@ -562,7 +804,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     if (!selectedClient) {
       setShowMemberEditForm(false);
-      setClientEditDraft({ name: "", centerId: "", phone: "", flagsNote: "", note: "" });
+      setClientEditDraft({ name: "", centerId: "", phone: "", flagsNote: "", note: "", preferredLessonType: "", memberStatus: "CURRENT" });
       return;
     }
     setClientEditDraft({
@@ -570,7 +812,9 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       centerId: selectedClient.centerId || selectedCenterId || "",
       phone: selectedClient.phone || "",
       flagsNote: selectedClient.flagsNote || "",
-      note: selectedClient.note || ""
+      note: selectedClient.note || "",
+      preferredLessonType: selectedClient.preferredLessonType || "",
+      memberStatus: selectedClient.memberStatus || "CURRENT"
     });
   }, [selectedClient, selectedCenterId]);
 
@@ -589,14 +833,31 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   }, [selectedReport]);
 
   useEffect(() => {
-    if (selectedCenterId) return;
-    const firstCenterId = centers[0]?.id;
-    if (firstCenterId) setSelectedCenterId(firstCenterId);
-  }, [centers, selectedCenterId]);
+    if (!selectedSequenceDetail) {
+      setShowSequenceEditForm(false);
+      return;
+    }
+    setSequenceEditDraft({
+      equipmentType: selectedSequenceDetail.equipmentType || "",
+      equipmentBrand: selectedSequenceDetail.equipmentBrand || "",
+      springSetting: selectedSequenceDetail.springSetting || "",
+      todaySequence: selectedSequenceDetail.todaySequence || "",
+      nextSequence: selectedSequenceDetail.nextSequence || "",
+      beforeMemo: selectedSequenceDetail.beforeMemo || "",
+      afterMemo: selectedSequenceDetail.afterMemo || "",
+      memberNotes: selectedSequenceDetail.memberNotes || ""
+    });
+  }, [selectedSequenceDetail]);
 
   useEffect(() => {
-    setGroupDraft((prev) => ({ ...prev, centerId: selectedCenterId }));
-  }, [selectedCenterId]);
+    if (selectedCenterId) {
+      setGroupDraft((prev) => ({ ...prev, centerId: selectedCenterId }));
+      return;
+    }
+    if (!groupDraft.centerId && centerTabs.length) {
+      setGroupDraft((prev) => ({ ...prev, centerId: centerTabs[0].id }));
+    }
+  }, [selectedCenterId, centerTabs, groupDraft.centerId]);
 
   useEffect(() => {
     const p = clientProfileQuery.data;
@@ -616,6 +877,16 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   }, [clientProfileQuery.data]);
 
   useEffect(() => {
+    setSelectedHistoryKey("");
+  }, [selectedMemberId]);
+
+  useEffect(() => {
+    if (!selectedMemberId) return;
+    if (personalMetaDraft.homeworkReminderAt) return;
+    setPersonalMetaDraft((prev) => ({ ...prev, homeworkReminderAt: currentLocalDateTimeRounded10() }));
+  }, [selectedMemberId, personalMetaDraft.homeworkReminderAt]);
+
+  useEffect(() => {
     if (!selectedTemplateId) return;
     const t = (groupSequenceTemplatesQuery.data || []).find((x) => x.id === selectedTemplateId);
     if (!t) return;
@@ -630,6 +901,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     return () => {
       if (recognitionRef.current) recognitionRef.current.stop();
+      if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
     };
   }, []);
 
@@ -773,7 +1045,9 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         centerId: clientEditDraft.centerId || selectedCenterId || undefined,
         phone: clientEditDraft.phone || undefined,
         flagsNote: clientEditDraft.flagsNote || undefined,
-        note: clientEditDraft.note || undefined
+        note: clientEditDraft.note || undefined,
+        preferredLessonType: clientEditDraft.preferredLessonType || undefined,
+        memberStatus: clientEditDraft.memberStatus
       }
     });
   };
@@ -810,6 +1084,101 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   const onToggleMember = (memberId: string) => {
     setSelectedMemberId((prev) => (prev === memberId ? "" : memberId));
+  };
+
+  const toggleSelectionMember = (memberId: string) => {
+    setSelectedClientIds((prev) => (prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]));
+  };
+
+  const onMemberRowClick = (
+    memberId: string,
+    index: number,
+    event: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }
+  ) => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+    const withToggleKey = !!event.ctrlKey || !!event.metaKey;
+    const withRangeKey = !!event.shiftKey;
+
+    if (withRangeKey && lastSelectedClientIndex !== null) {
+      const start = Math.min(lastSelectedClientIndex, index);
+      const end = Math.max(lastSelectedClientIndex, index);
+      const rangeIds = filteredClients.slice(start, end + 1).map((c) => c.id);
+      setSelectionMode(true);
+      setSelectedClientIds((prev) => Array.from(new Set([...prev, ...rangeIds])));
+      setSelectedMemberId(memberId);
+      return;
+    }
+
+    if (withToggleKey) {
+      setSelectionMode(true);
+      toggleSelectionMember(memberId);
+      setLastSelectedClientIndex(index);
+      setSelectedMemberId(memberId);
+      return;
+    }
+
+    if (selectionMode) {
+      toggleSelectionMember(memberId);
+      setLastSelectedClientIndex(index);
+      setSelectedMemberId(memberId);
+      return;
+    }
+
+    onToggleMember(memberId);
+  };
+
+  const onMemberPointerDown = (memberId: string, index: number, pointerType: string) => {
+    if (pointerType !== "touch") return;
+    if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
+    longPressTriggeredRef.current = false;
+    longPressTimerRef.current = window.setTimeout(() => {
+      setSelectionMode(true);
+      toggleSelectionMember(memberId);
+      setLastSelectedClientIndex(index);
+      setSelectedMemberId(memberId);
+      longPressTriggeredRef.current = true;
+    }, 450);
+  };
+
+  const clearMemberPointerPress = () => {
+    if (!longPressTimerRef.current) return;
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+
+  const endSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedClientIds([]);
+    setLastSelectedClientIndex(null);
+  };
+
+  const applyBulkCenter = () => {
+    if (!selectedClientIds.length) {
+      setNotice("일괄 변경할 회원을 먼저 선택하세요.");
+      return;
+    }
+    if (!bulkCenterId) {
+      setNotice("변경할 센터를 선택하세요.");
+      return;
+    }
+    setNotice("");
+    bulkClientUpdateMutation.mutate({ centerId: bulkCenterId });
+  };
+
+  const applyBulkLessonType = () => {
+    if (!selectedClientIds.length) {
+      setNotice("일괄 변경할 회원을 먼저 선택하세요.");
+      return;
+    }
+    if (!bulkLessonType) {
+      setNotice("변경할 기본 수업형태를 선택하세요.");
+      return;
+    }
+    setNotice("");
+    bulkClientUpdateMutation.mutate({ preferredLessonType: bulkLessonType });
   };
 
   const onToggleReport = (reportId: string) => {
@@ -967,6 +1336,16 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     });
   };
 
+  const onUpdateSequence = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedSequenceDetail?.id) return;
+    setNotice("");
+    updateGroupSequenceMutation.mutate({
+      sequenceId: selectedSequenceDetail.id,
+      payload: sequenceEditDraft
+    });
+  };
+
   const onAddCenter = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const name = newCenterName.trim();
@@ -974,7 +1353,17 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     createCenterMutation.mutate({ name });
   };
 
-  const onSavePersonalMeta = (e: FormEvent<HTMLFormElement>) => {
+  const applyLatestHomework = () => {
+    const latest = (clientHomeworksQuery.data || [])[0];
+    if (!latest?.content) {
+      setNotice("불러올 이전 숙제가 없습니다.");
+      return;
+    }
+    setPersonalMetaDraft((prev) => ({ ...prev, homeworkGiven: latest.content }));
+    setNotice("이전 숙제를 불러왔습니다.");
+  };
+
+  const onSavePersonalMeta = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedMemberId) {
       setNotice("먼저 회원을 선택해주세요.");
@@ -992,25 +1381,45 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       homeworkReminderAt: String(fd.get("homeworkReminderAt") || "")
     };
     setPersonalMetaDraft(next);
-    upsertClientProfileMutation.mutate({
-      clientId: selectedMemberId,
-      payload: {
-        painNote: next.painNote,
-        goalNote: next.goalNote,
-        surgeryHistory: next.surgeryHistory,
-        beforeClassMemo: next.beforeClassMemo,
-        afterClassMemo: next.afterClassMemo,
-        nextLessonPlan: next.nextLessonPlan
-      }
-    });
-    if (next.homeworkGiven) {
-      createHomeworkMutation.mutate({
+    try {
+      await upsertClientProfileMutation.mutateAsync({
         clientId: selectedMemberId,
-        content: next.homeworkGiven,
-        remindAt: next.homeworkReminderAt || undefined
+        payload: {
+          painNote: next.painNote,
+          goalNote: next.goalNote,
+          surgeryHistory: next.surgeryHistory,
+          beforeClassMemo: next.beforeClassMemo,
+          afterClassMemo: next.afterClassMemo,
+          nextLessonPlan: next.nextLessonPlan
+        }
       });
+
+      const remindAtIso = toIsoFromLocalDateTime(next.homeworkReminderAt);
+      if (next.homeworkGiven.trim()) {
+        await createHomeworkMutation.mutateAsync({
+          clientId: selectedMemberId,
+          content: next.homeworkGiven.trim(),
+          remindAt: remindAtIso || undefined
+        });
+      }
+
+      await createTrackingLogMutation.mutateAsync({
+        clientId: selectedMemberId,
+        payload: {
+          painNote: next.painNote || undefined,
+          goalNote: next.goalNote || undefined,
+          surgeryHistory: next.surgeryHistory || undefined,
+          beforeClassMemo: next.beforeClassMemo || undefined,
+          afterClassMemo: next.afterClassMemo || undefined,
+          nextLessonPlan: next.nextLessonPlan || undefined,
+          homeworkGiven: next.homeworkGiven.trim() || undefined,
+          homeworkReminderAt: remindAtIso || undefined
+        }
+      });
+      setNotice(next.homeworkGiven.trim() ? "회원 추적 저장 완료 (프로필 + 숙제 + 기록)." : "회원 추적 저장 완료 (프로필 + 기록).");
+    } catch {
+      setNotice("회원 추적 저장 중 오류가 발생했습니다. 입력 형식을 확인해주세요.");
     }
-    setNotice("개인레슨 메모/숙제 정보를 저장했습니다.");
   };
 
   const onSaveGroupSequence = (e: FormEvent<HTMLFormElement>) => {
@@ -1164,8 +1573,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       setNotice("먼저 회원을 선택해주세요.");
       return;
     }
-    const fileInput = e.currentTarget.querySelector<HTMLInputElement>("input[name='clientProgressPhoto']");
-    const file = fileInput?.files?.[0];
+    const file = pendingClientProgressPhotoFile;
     if (!file) {
       setNotice("업로드할 비포/애프터 사진을 선택해주세요.");
       return;
@@ -1177,8 +1585,45 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       note: progressPhotoNote || undefined,
       takenOn: progressPhotoTakenOn || undefined
     });
-    e.currentTarget.reset();
     setProgressPhotoNote("");
+  };
+
+  const onPickClientProgressPhoto = (file: File | null) => {
+    setProgressPhotoPickerBusy(false);
+    setPendingClientProgressPhotoFile(file);
+    if (file) {
+      setNotice(`파일 선택 완료: ${file.name}. 업로드 버튼을 눌러 저장하세요.`);
+      return;
+    }
+    setNotice("파일 선택이 취소되었습니다.");
+  };
+
+  const onStartEditProgressPhoto = (photoId: string) => {
+    const photo = (clientProgressPhotosQuery.data || []).find((p) => p.id === photoId);
+    if (!photo) return;
+    setEditingProgressPhotoId(photoId);
+    setProgressPhotoEditPhase(photo.phase);
+    setProgressPhotoEditNote(photo.note || "");
+    setProgressPhotoEditTakenOn(photo.takenOn || "");
+  };
+
+  const onSaveEditProgressPhoto = () => {
+    if (!selectedMemberId || !editingProgressPhotoId) return;
+    updateClientProgressPhotoMutation.mutate({
+      clientId: selectedMemberId,
+      photoId: editingProgressPhotoId,
+      payload: {
+        phase: progressPhotoEditPhase,
+        note: progressPhotoEditNote || undefined,
+        takenOn: progressPhotoEditTakenOn || undefined
+      }
+    });
+  };
+
+  const onDeleteProgressPhoto = (photoId: string) => {
+    if (!selectedMemberId) return;
+    if (!window.confirm("이 사진을 삭제할까요?")) return;
+    deleteClientProgressPhotoMutation.mutate({ clientId: selectedMemberId, photoId });
   };
 
   const copyShareUrl = async () => {
@@ -1231,11 +1676,18 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         <Card title="센터 / 탭">
           <div className="space-y-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
-              {centers.map((c) => (
+              <button
+                type="button"
+                onClick={() => setSelectedCenterId("")}
+                className={`rounded-lg border px-3 py-1.5 text-sm ${!selectedCenterId ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
+              >
+                전체
+              </button>
+              {centerTabs.map((c) => (
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setSelectedCenterId(c.id)}
+                  onClick={() => setSelectedCenterId((prev) => (prev === c.id ? "" : c.id))}
                   className={`rounded-lg border px-3 py-1.5 text-sm ${selectedCenterId === c.id ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
                 >
                   {c.name}
@@ -1290,6 +1742,55 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               {showMemberForm ? "닫기" : "회원 등록"}
             </button>
           </div>
+          <div className="mb-2 flex flex-wrap gap-1 text-xs">
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "ALL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("ALL")}>전체</button>
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "CURRENT" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("CURRENT")}>현재</button>
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "PAUSED" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("PAUSED")}>휴식</button>
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "FORMER" ? "border-slate-400 bg-slate-200 text-slate-700" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("FORMER")}>과거</button>
+          </div>
+          {selectionMode && (
+            <div className="mb-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-amber-800">{selectedClientIds.length}명 선택됨</p>
+                <button type="button" className="rounded border border-amber-300 px-2 py-0.5 text-amber-700" onClick={endSelectionMode}>
+                  선택 모드 종료
+                </button>
+              </div>
+              <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                <select className="field" value={bulkCenterId} onChange={(e) => setBulkCenterId(e.target.value)}>
+                  <option value="">센터 일괄 이동 선택</option>
+                  {centers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="rounded-md border border-amber-300 px-3 py-1.5 text-xs text-amber-700"
+                  onClick={applyBulkCenter}
+                  disabled={bulkClientUpdateMutation.isPending}
+                >
+                  센터 일괄 이동
+                </button>
+              </div>
+              <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                <select className="field" value={bulkLessonType} onChange={(e) => setBulkLessonType(e.target.value as "" | "PERSONAL" | "GROUP")}>
+                  <option value="">기본 수업형태 일괄 변경</option>
+                  <option value="PERSONAL">개인</option>
+                  <option value="GROUP">그룹</option>
+                </select>
+                <button
+                  type="button"
+                  className="rounded-md border border-amber-300 px-3 py-1.5 text-xs text-amber-700"
+                  onClick={applyBulkLessonType}
+                  disabled={bulkClientUpdateMutation.isPending}
+                >
+                  수업형태 일괄 변경
+                </button>
+              </div>
+            </div>
+          )}
 
           {showMemberForm && (
             <form className="mb-3 space-y-2 rounded-lg border border-slate-200 bg-white/80 p-2" onSubmit={onCreateClient}>
@@ -1310,20 +1811,36 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
             items={filteredClients}
             height={memberListHeight}
             rowHeight={memberListRowHeight}
-            renderRow={(c) => (
+            renderRow={(c, index) => (
               <button
                 type="button"
-                onClick={() => onToggleMember(c.id)}
-                className={`w-full rounded-lg border px-2 py-1 text-left ${selectedMemberId === c.id ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"}`}
+                onPointerDown={(e) => onMemberPointerDown(c.id, index, e.pointerType)}
+                onPointerUp={clearMemberPointerPress}
+                onPointerLeave={clearMemberPointerPress}
+                onClick={(e) => onMemberRowClick(c.id, index, e)}
+                className={`w-full rounded-lg border px-2 py-1 text-left ${selectedMemberId === c.id ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"} ${selectedClientIdSet.has(c.id) ? "ring-2 ring-amber-300" : ""}`}
               >
-                <p className="text-sm text-slate-900">
+                <p className="flex items-center gap-2 text-sm text-slate-900">
+                  {selectionMode && <input type="checkbox" readOnly checked={selectedClientIdSet.has(c.id)} className="h-3.5 w-3.5" />}
                   <span className="font-medium">{c.name}</span>
                   <span className="ml-2 text-xs text-slate-500">{c.phone || "전화 없음"}</span>
+                  <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] ${
+                    (c.memberStatus || "CURRENT") === "CURRENT"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : (c.memberStatus || "CURRENT") === "PAUSED"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-slate-200 text-slate-700"
+                  }`}>
+                    {(c.memberStatus || "CURRENT") === "CURRENT" ? "현재" : (c.memberStatus || "CURRENT") === "PAUSED" ? "휴식" : "과거"}
+                  </span>
                 </p>
               </button>
             )}
             getKey={(c) => c.id}
           />
+          <p className="mt-2 text-[11px] text-slate-500">
+            PC: Ctrl/Cmd 클릭 추가, Shift 범위 선택 | 모바일: 길게 눌러 선택 모드
+          </p>
 
           {selectedClient && (
             <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100 p-3 text-xs">
@@ -1340,6 +1857,8 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               <DetailRow label="이름" value={selectedClient.name} />
               <DetailRow label="센터" value={selectedClientCenterName} />
               <DetailRow label="전화" value={selectedClient.phone || "-"} />
+              <DetailRow label="기본 수업형태" value={selectedClient.preferredLessonType === "PERSONAL" ? "개인" : selectedClient.preferredLessonType === "GROUP" ? "그룹" : "-"} />
+              <DetailRow label="회원 상태" value={selectedClient.memberStatus === "PAUSED" ? "잠시 휴식" : selectedClient.memberStatus === "FORMER" ? "과거 회원" : "현재 회원"} />
               <DetailRow label="주의사항" value={selectedClient.flagsNote || "-"} />
               <DetailRow label="메모" value={selectedClient.note || "-"} />
               <DetailRow label="리포트 수" value={String(reports.length)} />
@@ -1388,6 +1907,26 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                     onChange={(e) => setClientEditDraft((p) => ({ ...p, note: e.target.value }))}
                     placeholder="메모"
                   />
+                  <p className="text-[11px] text-slate-500">기본 수업형태</p>
+                  <select
+                    className="field"
+                    value={clientEditDraft.preferredLessonType}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, preferredLessonType: e.target.value as "" | "PERSONAL" | "GROUP" }))}
+                  >
+                    <option value="">선택 안함</option>
+                    <option value="PERSONAL">개인</option>
+                    <option value="GROUP">그룹</option>
+                  </select>
+                  <p className="text-[11px] text-slate-500">회원 상태</p>
+                  <select
+                    className="field"
+                    value={clientEditDraft.memberStatus}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, memberStatus: e.target.value as "CURRENT" | "PAUSED" | "FORMER" }))}
+                  >
+                    <option value="CURRENT">현재 회원</option>
+                    <option value="PAUSED">잠시 휴식</option>
+                    <option value="FORMER">과거 회원</option>
+                  </select>
                   <button className="btn w-full" disabled={updateClientMutation.isPending}>
                     {updateClientMutation.isPending ? "수정중..." : "회원 정보 저장"}
                   </button>
@@ -1401,8 +1940,20 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
           <Card>
             <div className="flex gap-2 text-sm">
               <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "ALL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("ALL")}>전체</button>
-              <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "PERSONAL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("PERSONAL")}>개인</button>
-              <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "GROUP" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("GROUP")}>그룹</button>
+              <button
+                type="button"
+                className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "PERSONAL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`}
+                onClick={() => setLessonTypeFilter((prev) => (prev === "PERSONAL" ? "ALL" : "PERSONAL"))}
+              >
+                개인
+              </button>
+              <button
+                type="button"
+                className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "GROUP" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`}
+                onClick={() => setLessonTypeFilter((prev) => (prev === "GROUP" ? "ALL" : "GROUP"))}
+              >
+                그룹
+              </button>
             </div>
           </Card>
 
@@ -1423,7 +1974,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 type="button"
                 className={`rounded-md border px-3 py-2 text-sm ${activeLessonForm === "work" && activeWorkPane === "sequence" ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-300 text-slate-700"}`}
                 onClick={() => {
-                  setActiveLessonForm((prev) => (prev === "work" ? null : "work"));
+                  setActiveLessonForm((prev) => (prev === "work" && activeWorkPane === "sequence" ? null : "work"));
                   setActiveWorkPane("sequence");
                 }}
               >
@@ -1434,7 +1985,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 className={`rounded-md border px-3 py-2 text-sm ${activeLessonForm === "work" && activeWorkPane === "report" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 text-slate-700"}`}
                 disabled={!selectedMemberId}
                 onClick={() => {
-                  setActiveLessonForm((prev) => (prev === "work" ? null : "work"));
+                  setActiveLessonForm((prev) => (prev === "work" && activeWorkPane === "report" ? null : "work"));
                   setActiveWorkPane("report");
                 }}
               >
@@ -1694,7 +2245,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               )}
 
               {activeWorkPane === "report" && (
-              <section className={`space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/40 p-2 ${newSessionCue ? "animate-pulse" : ""}`}>
+              <section className={`space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/40 p-2 ${newSessionCue ? "ring-2 ring-yellow-300" : ""}`}>
                 <p className="text-xs font-semibold text-emerald-800">리포트 등록</p>
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <label className="flex items-center gap-1">
@@ -1775,16 +2326,27 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
           <section className="grid gap-4 md:grid-cols-2">
             <Card title="세션 타임라인 (리포트+시퀀스)">
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span className="text-slate-500">조회 날짜</span>
+                <input
+                  type="date"
+                  className="field max-w-44 !py-1"
+                  value={sessionDate}
+                  onChange={(e) => setSessionDate(e.target.value)}
+                />
+              </div>
               <VirtualList
                 items={timelineSessions}
                 height={timelineSessions.length ? 360 : 180}
                 rowHeight={112}
+                scrollToKey={timelineScrollTargetId}
                 renderRow={(s) => {
                   const report = reportBySessionId[s.id];
                   const seq = sequenceBySessionId[s.id];
                   const active = selectedTimelineSessionId === s.id;
                   const reportFlashing = flashReportSessionId === s.id;
                   const sequenceFlashing = flashSequenceSessionId === s.id;
+                  const actionGuide = flashNewSessionActionId === s.id;
                   const reportSelected = active && detailPanelMode === "report" && !!report && selectedReportId === report.id;
                   const sequenceSelected = active && detailPanelMode === "sequence" && !!seq && selectedSequenceDetail?.id === (seq as GroupSequenceLog).id;
                   return (
@@ -1798,26 +2360,30 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                       </p>
                       <p className="text-xs text-slate-500">{toShort(s.memo || "메모 없음", 22)}</p>
                       <div className="mt-1 grid grid-cols-2 gap-2 text-[11px]">
-                        <button
-                          type="button"
-                          className={`rounded border px-1.5 py-1 text-left transition-all ${seq ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-300 bg-slate-100 text-slate-600"} ${sequenceFlashing ? "ring-2 ring-cyan-300 shadow-[0_0_0_2px_rgba(34,211,238,0.2)]" : ""} ${sequenceSelected ? "ring-2 ring-cyan-400" : ""}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTimelineSequenceAction(s.id, (seq as GroupSequenceLog) || null);
-                          }}
-                        >
-                          시퀀스 {seq ? "보기" : "없음"}
-                        </button>
-                        <button
-                          type="button"
-                          className={`rounded border px-1.5 py-1 text-left transition-all ${report ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-slate-100 text-slate-600"} ${reportFlashing ? "ring-2 ring-emerald-300 shadow-[0_0_0_2px_rgba(52,211,153,0.2)]" : ""} ${reportSelected ? "ring-2 ring-emerald-400" : ""}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTimelineReportAction(s.id, report || null);
-                          }}
-                        >
-                          리포트 {report ? "보기" : "없음"}
-                        </button>
+                        <div className={`rounded ${actionGuide && !seq ? "blink-guide-wrap p-0.5" : ""}`}>
+                          <button
+                            type="button"
+                            className={`w-full rounded border px-1.5 py-1 text-left transition-all ${seq ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-300 bg-slate-100 text-slate-600"} ${sequenceFlashing ? "ring-2 ring-cyan-300 shadow-[0_0_0_2px_rgba(34,211,238,0.2)]" : ""} ${sequenceSelected ? "ring-2 ring-cyan-400" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTimelineSequenceAction(s.id, (seq as GroupSequenceLog) || null);
+                            }}
+                          >
+                            시퀀스 {seq ? "보기" : "없음"}
+                          </button>
+                        </div>
+                        <div className={`rounded ${actionGuide && !report ? "blink-guide-wrap p-0.5" : ""}`}>
+                          <button
+                            type="button"
+                            className={`w-full rounded border px-1.5 py-1 text-left transition-all ${report ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-slate-100 text-slate-600"} ${reportFlashing ? "ring-2 ring-emerald-300 shadow-[0_0_0_2px_rgba(52,211,153,0.2)]" : ""} ${reportSelected ? "ring-2 ring-emerald-400" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTimelineReportAction(s.id, report || null);
+                            }}
+                          >
+                            리포트 {report ? "보기" : "없음"}
+                          </button>
+                        </div>
                       </div>
                     </button>
                   );
@@ -1828,7 +2394,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               {!!selectedMemberId && !timelineSessions.length && <p className="mt-2 text-xs text-slate-500">해당 회원의 세션이 없습니다.</p>}
             </Card>
 
-            <Card title={detailPanelMode === "report" ? "리포트 상세 / 공유" : "시퀀스 상세"}>
+            <Card title="기록 상세">
               <div className="mb-2 flex items-center gap-2 text-xs">
                 <span className="text-slate-500">현재 보기:</span>
                 <span className={`rounded px-2 py-0.5 ${detailPanelMode === "report" ? "bg-emerald-100 text-emerald-700" : "bg-cyan-100 text-cyan-700"}`}>
@@ -1846,6 +2412,56 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   <DetailRow label="오늘 시퀀스" value={selectedSequenceDetail.todaySequence || "-"} />
                   <DetailRow label="다음 시퀀스" value={selectedSequenceDetail.nextSequence || "-"} />
                   <DetailRow label="작성일" value={formatDateTime(selectedSequenceDetail.createdAt)} />
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                    onClick={() => setShowSequenceEditForm((v) => !v)}
+                  >
+                    {showSequenceEditForm ? "수정 취소" : "시퀀스 수정"}
+                  </button>
+                  {showSequenceEditForm && (
+                    <form className="space-y-2 rounded-md border border-slate-300 bg-white/80 p-2" onSubmit={onUpdateSequence}>
+                      <p className="text-[11px] font-semibold text-slate-500">시퀀스 수정</p>
+                      <p className="text-[11px] text-slate-500">기구 종류</p>
+                      <input
+                        className="field"
+                        value={sequenceEditDraft.equipmentType}
+                        onChange={(e) => setSequenceEditDraft((p) => ({ ...p, equipmentType: e.target.value }))}
+                        placeholder="기구 종류"
+                      />
+                      <p className="text-[11px] text-slate-500">기구 브랜드</p>
+                      <input
+                        className="field"
+                        value={sequenceEditDraft.equipmentBrand}
+                        onChange={(e) => setSequenceEditDraft((p) => ({ ...p, equipmentBrand: e.target.value }))}
+                        placeholder="기구 브랜드"
+                      />
+                      <p className="text-[11px] text-slate-500">스프링 세팅</p>
+                      <input
+                        className="field"
+                        value={sequenceEditDraft.springSetting}
+                        onChange={(e) => setSequenceEditDraft((p) => ({ ...p, springSetting: e.target.value }))}
+                        placeholder="스프링 세팅"
+                      />
+                      <p className="text-[11px] text-slate-500">오늘 시퀀스</p>
+                      <textarea
+                        className="field min-h-16"
+                        value={sequenceEditDraft.todaySequence}
+                        onChange={(e) => setSequenceEditDraft((p) => ({ ...p, todaySequence: e.target.value }))}
+                        placeholder="오늘 시퀀스"
+                      />
+                      <p className="text-[11px] text-slate-500">다음 시퀀스</p>
+                      <textarea
+                        className="field min-h-16"
+                        value={sequenceEditDraft.nextSequence}
+                        onChange={(e) => setSequenceEditDraft((p) => ({ ...p, nextSequence: e.target.value }))}
+                        placeholder="다음 시퀀스"
+                      />
+                      <button className="btn w-full" disabled={updateGroupSequenceMutation.isPending}>
+                        {updateGroupSequenceMutation.isPending ? "수정중..." : "시퀀스 수정 저장"}
+                      </button>
+                    </form>
+                  )}
                 </div>
               )}
               {detailPanelMode === "report" && !selectedReport && (
@@ -1961,24 +2577,136 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
             value={memberSearch}
             onChange={(e) => setMemberSearch(e.target.value)}
           />
+          <div className="mb-2 flex flex-wrap gap-1 text-xs">
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "ALL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("ALL")}>전체</button>
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "CURRENT" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("CURRENT")}>현재</button>
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "PAUSED" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("PAUSED")}>휴식</button>
+            <button type="button" className={`rounded border px-2 py-0.5 ${memberStatusFilter === "FORMER" ? "border-slate-400 bg-slate-200 text-slate-700" : "border-slate-300"}`} onClick={() => setMemberStatusFilter("FORMER")}>과거</button>
+          </div>
           <VirtualList
             items={filteredClients}
             height={memberListHeight}
             rowHeight={memberListRowHeight}
-            renderRow={(c) => (
+            renderRow={(c, index) => (
               <button
                 type="button"
-                onClick={() => onToggleMember(c.id)}
-                className={`w-full rounded-lg border px-2 py-1 text-left ${selectedMemberId === c.id ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"}`}
+                onPointerDown={(e) => onMemberPointerDown(c.id, index, e.pointerType)}
+                onPointerUp={clearMemberPointerPress}
+                onPointerLeave={clearMemberPointerPress}
+                onClick={(e) => onMemberRowClick(c.id, index, e)}
+                className={`w-full rounded-lg border px-2 py-1 text-left ${selectedMemberId === c.id ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"} ${selectedClientIdSet.has(c.id) ? "ring-2 ring-amber-300" : ""}`}
               >
-                <p className="text-sm text-slate-900">
+                <p className="flex items-center gap-2 text-sm text-slate-900">
+                  {selectionMode && <input type="checkbox" readOnly checked={selectedClientIdSet.has(c.id)} className="h-3.5 w-3.5" />}
                   <span className="font-medium">{c.name}</span>
                   <span className="ml-2 text-xs text-slate-500">{c.phone || "전화 없음"}</span>
+                  <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] ${
+                    (c.memberStatus || "CURRENT") === "CURRENT"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : (c.memberStatus || "CURRENT") === "PAUSED"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-slate-200 text-slate-700"
+                  }`}>
+                    {(c.memberStatus || "CURRENT") === "CURRENT" ? "현재" : (c.memberStatus || "CURRENT") === "PAUSED" ? "휴식" : "과거"}
+                  </span>
                 </p>
               </button>
             )}
             getKey={(c) => c.id}
           />
+          {selectedClient && (
+            <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100 p-3 text-xs">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="font-semibold text-slate-900">선택 회원 정보</p>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-300 px-2 py-1 text-[11px] text-slate-700"
+                  onClick={() => setShowMemberEditForm((v) => !v)}
+                >
+                  {showMemberEditForm ? "수정 취소" : "회원 정보 수정"}
+                </button>
+              </div>
+              <DetailRow label="이름" value={selectedClient.name} />
+              <DetailRow label="센터" value={selectedClientCenterName} />
+              <DetailRow label="전화" value={selectedClient.phone || "-"} />
+              <DetailRow label="기본 수업형태" value={selectedClient.preferredLessonType === "PERSONAL" ? "개인" : selectedClient.preferredLessonType === "GROUP" ? "그룹" : "-"} />
+              <DetailRow label="회원 상태" value={selectedClient.memberStatus === "PAUSED" ? "잠시 휴식" : selectedClient.memberStatus === "FORMER" ? "과거 회원" : "현재 회원"} />
+              <DetailRow label="주의사항" value={selectedClient.flagsNote || "-"} />
+              <DetailRow label="아픈 부위/증상" value={clientProfileQuery.data?.painNote || "-"} />
+              <DetailRow label="목표" value={clientProfileQuery.data?.goalNote || "-"} />
+              <DetailRow label="수술 이력" value={clientProfileQuery.data?.surgeryHistory || "-"} />
+              {showMemberEditForm && (
+                <form className="mt-3 space-y-2 rounded-md border border-slate-300 bg-white/80 p-2" onSubmit={onUpdateClient}>
+                  <p className="text-[11px] font-semibold text-slate-500">회원 정보 수정</p>
+                  <p className="text-[11px] text-slate-500">이름</p>
+                  <input
+                    className="field"
+                    value={clientEditDraft.name}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="이름"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-500">센터 이동</p>
+                  <select
+                    className="field"
+                    value={clientEditDraft.centerId}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, centerId: e.target.value }))}
+                  >
+                    <option value="">센터 선택</option>
+                    {centers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500">기본 수업형태</p>
+                  <select
+                    className="field"
+                    value={clientEditDraft.preferredLessonType}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, preferredLessonType: e.target.value as "" | "PERSONAL" | "GROUP" }))}
+                  >
+                    <option value="">선택 안함</option>
+                    <option value="PERSONAL">개인</option>
+                    <option value="GROUP">그룹</option>
+                  </select>
+                  <p className="text-[11px] text-slate-500">회원 상태</p>
+                  <select
+                    className="field"
+                    value={clientEditDraft.memberStatus}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, memberStatus: e.target.value as "CURRENT" | "PAUSED" | "FORMER" }))}
+                  >
+                    <option value="CURRENT">현재 회원</option>
+                    <option value="PAUSED">잠시 휴식</option>
+                    <option value="FORMER">과거 회원</option>
+                  </select>
+                  <p className="text-[11px] text-slate-500">전화</p>
+                  <input
+                    className="field"
+                    value={clientEditDraft.phone}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, phone: e.target.value }))}
+                    placeholder="전화"
+                  />
+                  <p className="text-[11px] text-slate-500">주의사항</p>
+                  <input
+                    className="field"
+                    value={clientEditDraft.flagsNote}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, flagsNote: e.target.value }))}
+                    placeholder="주의사항"
+                  />
+                  <p className="text-[11px] text-slate-500">메모</p>
+                  <textarea
+                    className="field min-h-16"
+                    value={clientEditDraft.note}
+                    onChange={(e) => setClientEditDraft((p) => ({ ...p, note: e.target.value }))}
+                    placeholder="메모"
+                  />
+                  <button className="btn w-full" disabled={updateClientMutation.isPending}>
+                    {updateClientMutation.isPending ? "수정중..." : "회원 정보 저장"}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </Card>
 
         <div className="space-y-4">
@@ -2012,33 +2740,290 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 <textarea name="nextLessonPlan" className="field min-h-16" value={personalMetaDraft.nextLessonPlan} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, nextLessonPlan: e.target.value }))} />
               </div>
               <div>
-                <p className="mb-1 text-[11px] text-slate-500">이번 숙제</p>
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-[11px] text-slate-500">이번 숙제</p>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-300 px-2 py-0.5 text-[11px] text-slate-700"
+                    onClick={applyLatestHomework}
+                  >
+                    이전 숙제 불러오기
+                  </button>
+                </div>
                 <input name="homeworkGiven" className="field" value={personalMetaDraft.homeworkGiven} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkGiven: e.target.value }))} />
               </div>
               <div>
                 <p className="mb-1 text-[11px] text-slate-500">숙제 알림 시각</p>
-                <input name="homeworkReminderAt" type="datetime-local" className="field" value={personalMetaDraft.homeworkReminderAt} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkReminderAt: e.target.value }))} />
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="date"
+                    className="field"
+                    value={splitLocalDateTime(personalMetaDraft.homeworkReminderAt).date}
+                    onChange={(e) =>
+                      setPersonalMetaDraft((p) => ({
+                        ...p,
+                        homeworkReminderAt: mergeLocalDateTime(
+                          e.target.value,
+                          splitLocalDateTime(p.homeworkReminderAt).hour,
+                          splitLocalDateTime(p.homeworkReminderAt).minute
+                        )
+                      }))
+                    }
+                  />
+                  <select
+                    className="field"
+                    value={splitLocalDateTime(personalMetaDraft.homeworkReminderAt).hour}
+                    onChange={(e) =>
+                      setPersonalMetaDraft((p) => ({
+                        ...p,
+                        homeworkReminderAt: mergeLocalDateTime(
+                          splitLocalDateTime(p.homeworkReminderAt).date,
+                          e.target.value,
+                          splitLocalDateTime(p.homeworkReminderAt).minute
+                        )
+                      }))
+                    }
+                  >
+                    <option value="">시</option>
+                    {HOUR_OPTIONS.map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="field"
+                    value={splitLocalDateTime(personalMetaDraft.homeworkReminderAt).minute}
+                    onChange={(e) =>
+                      setPersonalMetaDraft((p) => ({
+                        ...p,
+                        homeworkReminderAt: mergeLocalDateTime(
+                          splitLocalDateTime(p.homeworkReminderAt).date,
+                          splitLocalDateTime(p.homeworkReminderAt).hour,
+                          e.target.value
+                        )
+                      }))
+                    }
+                  >
+                    <option value="">분</option>
+                    {MINUTE_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <input name="homeworkReminderAt" type="hidden" value={personalMetaDraft.homeworkReminderAt} />
+                <p className="mt-1 text-[11px] text-slate-500">날짜와 시간을 각각 선택하세요. 비워두면 알림 없이 숙제만 저장됩니다.</p>
               </div>
               <button className="btn md:col-span-2" disabled={!selectedMemberId}>회원 추적 저장</button>
             </form>
+            {selectedMemberId && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white/80 p-2 text-xs">
+                <p className="mb-1 font-semibold text-slate-700">현재 저장값</p>
+                <DetailRow label="아픈 부위/증상" value={clientProfileQuery.data?.painNote || "-"} />
+                <DetailRow label="목표" value={clientProfileQuery.data?.goalNote || "-"} />
+                <DetailRow label="수술 이력" value={clientProfileQuery.data?.surgeryHistory || "-"} />
+                <DetailRow label="수업 전 메모" value={clientProfileQuery.data?.beforeClassMemo || "-"} />
+                <DetailRow label="수업 후 기록" value={clientProfileQuery.data?.afterClassMemo || "-"} />
+                <DetailRow label="다음 레슨 계획" value={clientProfileQuery.data?.nextLessonPlan || "-"} />
+              </div>
+            )}
           </Card>
 
-          <Card title="숙제 목록">
-            <ul className="max-h-[24vh] space-y-2 overflow-y-auto pr-1 text-sm">
-              {(clientHomeworksQuery.data || []).map((h) => (
-                <li key={h.id} className="rounded-lg border border-slate-200 bg-white/80 p-2">
-                  <p className="font-medium text-slate-900">{h.content}</p>
-                  <p className="text-xs text-slate-500">
-                    생성: {formatDateTime(h.createdAt)} {h.remindAt ? `/ 알림: ${formatDateTime(h.remindAt)}` : ""}
+          <Card title="개인 기록 타임라인 (숙제 + 추적)">
+            <VirtualList
+              items={historyEntries}
+              height={240}
+              rowHeight={76}
+              renderRow={(entry) => (
+                <button
+                  type="button"
+                  className={`w-full rounded-lg border p-2 text-left ${selectedHistoryKey === entry.key ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"}`}
+                  onClick={() => setSelectedHistoryKey((prev) => (prev === entry.key ? "" : entry.key))}
+                >
+                  <p className="text-xs font-semibold text-slate-800">
+                    {entry.kind === "tracking" ? "회원 추적" : "숙제"} | {formatDateTime(entry.createdAt)}
                   </p>
-                </li>
-              ))}
-              {!selectedMemberId && <p className="text-xs text-slate-500">회원을 선택하면 숙제 목록이 표시됩니다.</p>}
-              {!!selectedMemberId && !(clientHomeworksQuery.data || []).length && <p className="text-xs text-slate-500">등록된 숙제가 없습니다.</p>}
-            </ul>
+                  <p className="truncate text-xs text-slate-600">{entry.summary}</p>
+                </button>
+              )}
+              getKey={(entry) => entry.key}
+            />
+            {!selectedMemberId && <p className="mt-2 text-xs text-slate-500">회원을 선택하면 기록이 표시됩니다.</p>}
+            {!!selectedMemberId && !historyEntries.length && <p className="mt-2 text-xs text-slate-500">저장된 기록이 없습니다.</p>}
+
+            {selectedHistoryEntry && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white/80 p-3 text-xs">
+                <p className="mb-2 font-semibold text-slate-800">
+                  {selectedHistoryEntry.kind === "tracking" ? "회원 추적 상세" : "숙제 상세"}
+                </p>
+                <DetailRow label="기록일" value={formatDateTime(selectedHistoryEntry.createdAt)} />
+                {selectedHistoryEntry.kind === "tracking" ? (
+                  <>
+                    <DetailRow label="증상" value={(selectedHistoryEntry.detail as { painNote?: string }).painNote || "-"} />
+                    <DetailRow label="목표" value={(selectedHistoryEntry.detail as { goalNote?: string }).goalNote || "-"} />
+                    <DetailRow label="수술 이력" value={(selectedHistoryEntry.detail as { surgeryHistory?: string }).surgeryHistory || "-"} />
+                    <DetailRow label="수업 전 메모" value={(selectedHistoryEntry.detail as { beforeClassMemo?: string }).beforeClassMemo || "-"} />
+                    <DetailRow label="수업 후 기록" value={(selectedHistoryEntry.detail as { afterClassMemo?: string }).afterClassMemo || "-"} />
+                    <DetailRow label="다음 레슨 계획" value={(selectedHistoryEntry.detail as { nextLessonPlan?: string }).nextLessonPlan || "-"} />
+                    <DetailRow label="숙제" value={(selectedHistoryEntry.detail as { homeworkGiven?: string }).homeworkGiven || "-"} />
+                  </>
+                ) : (
+                  <>
+                    <DetailRow label="내용" value={(selectedHistoryEntry.detail as { content?: string }).content || "-"} />
+                    <DetailRow label="알림 시각" value={formatNullableDateTime((selectedHistoryEntry.detail as { remindAt?: string }).remindAt)} />
+                    <DetailRow label="완료 여부" value={(selectedHistoryEntry.detail as { completed?: boolean }).completed ? "완료" : "미완료"} />
+                  </>
+                )}
+              </div>
+            )}
           </Card>
 
           <Card title="비포/애프터 사진">
+            <div className="mb-2">
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700"
+                onClick={() => setShowProgressPhotoUploadModal(true)}
+                disabled={!selectedMemberId}
+              >
+                사진 등록
+              </button>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <section className="rounded-lg border border-slate-200 bg-white/70 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-700">비포</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {beforeProgressPhotos.map((p) => (
+                    <div key={p.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white/80">
+                      <button
+                        type="button"
+                        className="w-full text-left"
+                        onClick={() => setSelectedPhotoPreview(clientProgressPhotoUrls[p.id] || p.imageUrl)}
+                      >
+                        <img src={clientProgressPhotoUrls[p.id] || p.imageUrl} alt={p.fileName} className="h-24 w-full object-cover" />
+                      </button>
+                      <div className="space-y-1 p-2">
+                        <p className="text-[11px] text-slate-500">{p.takenOn || "-"}</p>
+                        {editingProgressPhotoId === p.id ? (
+                          <div className="space-y-1">
+                            <select className="field !py-1 text-xs" value={progressPhotoEditPhase} onChange={(e) => setProgressPhotoEditPhase(e.target.value as "BEFORE" | "AFTER" | "ETC")}>
+                              <option value="BEFORE">비포</option>
+                              <option value="AFTER">애프터</option>
+                              <option value="ETC">기타</option>
+                            </select>
+                            <input className="field !py-1 text-xs" type="date" value={progressPhotoEditTakenOn} onChange={(e) => setProgressPhotoEditTakenOn(e.target.value)} />
+                            <input className="field !py-1 text-xs" value={progressPhotoEditNote} onChange={(e) => setProgressPhotoEditNote(e.target.value)} placeholder="메모" />
+                            <div className="flex gap-1">
+                              <button type="button" className="rounded border border-slate-300 px-2 py-0.5 text-[11px]" onClick={onSaveEditProgressPhoto} disabled={updateClientProgressPhotoMutation.isPending}>
+                                저장
+                              </button>
+                              <button type="button" className="rounded border border-slate-300 px-2 py-0.5 text-[11px]" onClick={() => setEditingProgressPhotoId("")}>
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <button type="button" className="rounded border border-slate-300 px-2 py-0.5 text-[11px]" onClick={() => onStartEditProgressPhoto(p.id)}>
+                              수정
+                            </button>
+                            <button type="button" className="rounded border border-rose-300 px-2 py-0.5 text-[11px] text-rose-700" onClick={() => onDeleteProgressPhoto(p.id)} disabled={deleteClientProgressPhotoMutation.isPending}>
+                              삭제
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {!beforeProgressPhotos.length && <p className="text-[11px] text-slate-500">비포 사진이 없습니다.</p>}
+              </section>
+              <section className="rounded-lg border border-slate-200 bg-white/70 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-700">애프터</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {afterProgressPhotos.map((p) => (
+                    <div key={p.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white/80">
+                      <button
+                        type="button"
+                        className="w-full text-left"
+                        onClick={() => setSelectedPhotoPreview(clientProgressPhotoUrls[p.id] || p.imageUrl)}
+                      >
+                        <img src={clientProgressPhotoUrls[p.id] || p.imageUrl} alt={p.fileName} className="h-24 w-full object-cover" />
+                      </button>
+                      <div className="space-y-1 p-2">
+                        <p className="text-[11px] text-slate-500">{p.takenOn || "-"}</p>
+                        {editingProgressPhotoId === p.id ? (
+                          <div className="space-y-1">
+                            <select className="field !py-1 text-xs" value={progressPhotoEditPhase} onChange={(e) => setProgressPhotoEditPhase(e.target.value as "BEFORE" | "AFTER" | "ETC")}>
+                              <option value="BEFORE">비포</option>
+                              <option value="AFTER">애프터</option>
+                              <option value="ETC">기타</option>
+                            </select>
+                            <input className="field !py-1 text-xs" type="date" value={progressPhotoEditTakenOn} onChange={(e) => setProgressPhotoEditTakenOn(e.target.value)} />
+                            <input className="field !py-1 text-xs" value={progressPhotoEditNote} onChange={(e) => setProgressPhotoEditNote(e.target.value)} placeholder="메모" />
+                            <div className="flex gap-1">
+                              <button type="button" className="rounded border border-slate-300 px-2 py-0.5 text-[11px]" onClick={onSaveEditProgressPhoto} disabled={updateClientProgressPhotoMutation.isPending}>
+                                저장
+                              </button>
+                              <button type="button" className="rounded border border-slate-300 px-2 py-0.5 text-[11px]" onClick={() => setEditingProgressPhotoId("")}>
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <button type="button" className="rounded border border-slate-300 px-2 py-0.5 text-[11px]" onClick={() => onStartEditProgressPhoto(p.id)}>
+                              수정
+                            </button>
+                            <button type="button" className="rounded border border-rose-300 px-2 py-0.5 text-[11px] text-rose-700" onClick={() => onDeleteProgressPhoto(p.id)} disabled={deleteClientProgressPhotoMutation.isPending}>
+                              삭제
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {!afterProgressPhotos.length && <p className="text-[11px] text-slate-500">애프터 사진이 없습니다.</p>}
+              </section>
+            </div>
+            {!!etcProgressPhotos.length && (
+              <section className="mt-3 rounded-lg border border-slate-200 bg-white/70 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-700">기타</p>
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  {etcProgressPhotos.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="overflow-hidden rounded-lg border border-slate-200 bg-white/80 text-left"
+                      onClick={() => setSelectedPhotoPreview(clientProgressPhotoUrls[p.id] || p.imageUrl)}
+                    >
+                      <img src={clientProgressPhotoUrls[p.id] || p.imageUrl} alt={p.fileName} className="h-24 w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          </Card>
+        </div>
+      </section>
+      )}
+
+      {showProgressPhotoUploadModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowProgressPhotoUploadModal(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Enter" || e.key === " ") setShowProgressPhotoUploadModal(false);
+          }}
+        >
+          <div className="w-full max-w-2xl rounded-xl border border-white/40 bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+            <p className="mb-3 text-sm font-semibold text-slate-900">비포/애프터 사진 등록</p>
             <form className="grid gap-2 md:grid-cols-4" onSubmit={onUploadClientProgressPhoto}>
               <div>
                 <p className="mb-1 text-[11px] text-slate-500">구분</p>
@@ -2056,31 +3041,35 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 <p className="mb-1 text-[11px] text-slate-500">메모</p>
                 <input className="field" value={progressPhotoNote} onChange={(e) => setProgressPhotoNote(e.target.value)} placeholder="예: 체형 정렬 체크" />
               </div>
-              <input name="clientProgressPhoto" type="file" accept="image/*" className="field md:col-span-3" />
+              <input
+                key={clientProgressPhotoInputKey}
+                name="clientProgressPhoto"
+                type="file"
+                accept="image/*"
+                className="field md:col-span-3"
+                onClick={() => {
+                  setProgressPhotoPickerBusy(true);
+                  setNotice("파일 선택창 여는 중...");
+                }}
+                onBlur={() => setProgressPhotoPickerBusy(false)}
+                onChange={(e) => onPickClientProgressPhoto(e.currentTarget.files?.[0] || null)}
+              />
               <button className="btn md:col-span-1" disabled={uploadClientProgressPhotoMutation.isPending || !selectedMemberId}>
                 {uploadClientProgressPhotoMutation.isPending ? "업로드중..." : "사진 업로드"}
               </button>
+              <p className="md:col-span-4 text-[11px] text-slate-500">
+                {progressPhotoPickerBusy
+                  ? "파일 선택창 처리 중..."
+                  : pendingClientProgressPhotoFile
+                    ? `선택 파일: ${pendingClientProgressPhotoFile.name}`
+                    : "파일을 선택하면 여기 표시됩니다."}
+              </p>
+              <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700 md:col-span-4" onClick={() => setShowProgressPhotoUploadModal(false)}>
+                닫기
+              </button>
             </form>
-
-            <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-              {(clientProgressPhotosQuery.data || []).map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className="overflow-hidden rounded-lg border border-slate-200 bg-white/80 text-left"
-                  onClick={() => setSelectedPhotoPreview(clientProgressPhotoUrls[p.id] || p.imageUrl)}
-                >
-                  <img src={clientProgressPhotoUrls[p.id] || p.imageUrl} alt={p.fileName} className="h-24 w-full object-cover" />
-                  <div className="p-2">
-                    <p className="text-[11px] font-semibold text-slate-700">{p.phase}</p>
-                    <p className="text-[11px] text-slate-500">{p.takenOn || "-"}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </Card>
+          </div>
         </div>
-      </section>
       )}
 
       {selectedPhotoPreview && (
@@ -2115,6 +3104,7 @@ function VirtualList<T>({
   height,
   rowHeight,
   overscan = 4,
+  scrollToKey,
   renderRow,
   getKey
 }: {
@@ -2122,17 +3112,33 @@ function VirtualList<T>({
   height: number;
   rowHeight: number;
   overscan?: number;
+  scrollToKey?: string;
   renderRow: (item: T, index: number) => ReactNode;
   getKey: (item: T, index: number) => string;
 }) {
   const [scrollTop, setScrollTop] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const totalHeight = items.length * rowHeight;
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const end = Math.min(items.length, Math.ceil((scrollTop + height) / rowHeight) + overscan);
   const visible = items.slice(start, end);
 
+  useEffect(() => {
+    if (!scrollToKey || !containerRef.current) return;
+    const idx = items.findIndex((item, index) => getKey(item, index) === scrollToKey);
+    if (idx < 0) return;
+    const top = idx * rowHeight;
+    const bottom = top + rowHeight;
+    const viewTop = containerRef.current.scrollTop;
+    const viewBottom = viewTop + height;
+    if (top >= viewTop && bottom <= viewBottom) return;
+    const nextTop = Math.max(0, top - Math.floor(height / 2 - rowHeight / 2));
+    containerRef.current.scrollTop = nextTop;
+    setScrollTop(nextTop);
+  }, [scrollToKey, items, rowHeight, height, getKey]);
+
   return (
-    <div className="overflow-y-auto scroll-smooth pr-1" style={{ height }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+    <div ref={containerRef} className="overflow-y-auto pr-1" style={{ height }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
       <div style={{ height: totalHeight, position: "relative" }}>
         {visible.map((item, localIndex) => {
           const index = start + localIndex;
@@ -2201,8 +3207,48 @@ function toEquipmentTypeLabel(raw?: string | null) {
   return EQUIPMENT_OPTIONS.find((o) => o.value === raw)?.label || raw;
 }
 
+function toIsoFromLocalDateTime(value?: string) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString();
+}
+
+function splitLocalDateTime(value?: string) {
+  if (!value || !value.includes("T")) {
+    return { date: "", hour: "", minute: "" };
+  }
+  const [date, time] = value.split("T");
+  const [hour, minute] = (time || "").split(":");
+  return { date: date || "", hour: hour || "", minute: (minute || "").slice(0, 2) };
+}
+
+function mergeLocalDateTime(date?: string, hour?: string, minute?: string) {
+  if (!date) return "";
+  const safeHour = hour && hour !== "" ? hour : "00";
+  const safeMinute = minute && minute !== "" ? minute : "00";
+  return `${date}T${safeHour}:${safeMinute}`;
+}
+
+function currentLocalDateTimeRounded10() {
+  const now = new Date();
+  const roundedMinute = Math.floor(now.getMinutes() / 10) * 10;
+  now.setMinutes(roundedMinute, 0, 0);
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mi = String(now.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
+}
+
+function formatNullableDateTime(value?: string | null) {
+  if (!value) return "-";
+  return formatDateTime(value);
 }
 
 function toShort(value: string, max = 16) {

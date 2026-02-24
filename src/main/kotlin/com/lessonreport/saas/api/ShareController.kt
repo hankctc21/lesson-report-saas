@@ -14,6 +14,8 @@ import org.springframework.http.HttpStatus
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -74,7 +76,9 @@ class ShareController(
         share.lastViewedAt = Instant.now()
 
         val report = share.report!!
-        val photos = reportPhotoRepository.findByReportIdOrderByCreatedAtDesc(report.id!!).map {
+        val photos = reportPhotoRepository.findByReportIdOrderByCreatedAtDesc(report.id!!)
+            .filter { fileExists(it.storagePath) }
+            .map {
             PublicSharePhotoResponse(
                 id = it.id!!,
                 imageUrl = "/api/v1/share/${share.token}/photos/${it.id}",
@@ -83,6 +87,7 @@ class ShareController(
         }
         val progressPhotos = clientProgressPhotoRepository
             .findTop12ByClientIdAndInstructorIdOrderByCreatedAtDesc(report.client!!.id!!, report.instructor!!.id!!)
+            .filter { fileExists(it.storagePath) }
             .map {
                 PublicShareProgressPhotoResponse(
                     id = it.id!!,
@@ -108,6 +113,11 @@ class ShareController(
             expiresAt = share.expiresAt!!,
             viewCount = share.viewCount
         )
+    }
+
+    private fun fileExists(path: String?): Boolean {
+        val p = runCatching { Paths.get(path ?: "") }.getOrNull() ?: return false
+        return Files.exists(p)
     }
 }
 
