@@ -44,6 +44,7 @@ export type Homework = {
 export type GroupSequence = {
   id: string;
   centerId: string;
+  lessonType: "PERSONAL" | "GROUP";
   classDate: string;
   equipmentBrand?: string;
   springSetting?: string;
@@ -52,6 +53,17 @@ export type GroupSequence = {
   beforeMemo?: string;
   afterMemo?: string;
   memberNotes?: string;
+  createdAt: string;
+};
+
+export type GroupSequenceTemplate = {
+  id: string;
+  centerId: string;
+  lessonType: "PERSONAL" | "GROUP";
+  title: string;
+  equipmentBrand?: string;
+  springSetting?: string;
+  sequenceBody?: string;
   createdAt: string;
 };
 

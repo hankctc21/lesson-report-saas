@@ -4,6 +4,7 @@ import type {
   Client,
   ClientProfile,
   ClientProgressPhoto,
+  GroupSequenceTemplate,
   GroupSequence,
   Homework,
   LoginResponse,
@@ -81,13 +82,15 @@ export const createClientHomework = async (clientId: string, payload: { content:
   return data;
 };
 
-export const listGroupSequences = async (centerId: string) => {
-  const { data } = await api.get<GroupSequence[]>(`/api/v1/group-sequences?centerId=${centerId}`);
+export const listGroupSequences = async (centerId: string, lessonType?: "PERSONAL" | "GROUP") => {
+  const q = lessonType ? `&lessonType=${lessonType}` : "";
+  const { data } = await api.get<GroupSequence[]>(`/api/v1/group-sequences?centerId=${centerId}${q}`);
   return data;
 };
 
 export const createGroupSequence = async (payload: {
   centerId: string;
+  lessonType: "PERSONAL" | "GROUP";
   classDate: string;
   equipmentBrand?: string;
   springSetting?: string;
@@ -98,6 +101,23 @@ export const createGroupSequence = async (payload: {
   memberNotes?: string;
 }) => {
   const { data } = await api.post<GroupSequence>("/api/v1/group-sequences", payload);
+  return data;
+};
+
+export const listGroupSequenceTemplates = async (centerId: string, lessonType: "PERSONAL" | "GROUP") => {
+  const { data } = await api.get<GroupSequenceTemplate[]>(`/api/v1/group-sequence-templates?centerId=${centerId}&lessonType=${lessonType}`);
+  return data;
+};
+
+export const createGroupSequenceTemplate = async (payload: {
+  centerId: string;
+  lessonType: "PERSONAL" | "GROUP";
+  title: string;
+  equipmentBrand?: string;
+  springSetting?: string;
+  sequenceBody?: string;
+}) => {
+  const { data } = await api.post<GroupSequenceTemplate>("/api/v1/group-sequence-templates", payload);
   return data;
 };
 

@@ -1,11 +1,12 @@
 package com.lessonreport.saas.api
 
-import com.lessonreport.saas.domain.GroupSequenceLog
+import com.lessonreport.saas.domain.GroupSequenceTemplate
 import com.lessonreport.saas.domain.SessionType
 import com.lessonreport.saas.repository.CenterRepository
-import com.lessonreport.saas.repository.GroupSequenceLogRepository
+import com.lessonreport.saas.repository.GroupSequenceTemplateRepository
 import com.lessonreport.saas.service.InstructorContext
 import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 import org.springframework.http.HttpStatus
@@ -18,94 +19,73 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 @RestController
-@RequestMapping("/api/v1/group-sequences")
-class GroupSequenceController(
-    private val groupSequenceLogRepository: GroupSequenceLogRepository,
+@RequestMapping("/api/v1/group-sequence-templates")
+class GroupSequenceTemplateController(
     private val centerRepository: CenterRepository,
+    private val groupSequenceTemplateRepository: GroupSequenceTemplateRepository,
     private val instructorContext: InstructorContext
 ) {
     @GetMapping
-    fun list(@RequestParam centerId: UUID, @RequestParam(required = false) lessonType: SessionType?): List<GroupSequenceResponse> {
+    fun list(@RequestParam centerId: UUID, @RequestParam lessonType: SessionType): List<GroupSequenceTemplateResponse> {
         val instructorId = instructorContext.currentInstructorId()
         ensureOwnedCenter(centerId, instructorId)
-        val rows = if (lessonType == null) {
-            groupSequenceLogRepository.findByCenterIdAndInstructorIdOrderByClassDateDescCreatedAtDesc(centerId, instructorId)
-        } else {
-            groupSequenceLogRepository.findByCenterIdAndInstructorIdAndLessonTypeOrderByClassDateDescCreatedAtDesc(centerId, instructorId, lessonType)
-        }
-        return rows
+        return groupSequenceTemplateRepository
+            .findByCenterIdAndInstructorIdAndLessonTypeOrderByCreatedAtDesc(centerId, instructorId, lessonType)
             .map { it.toResponse() }
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun create(@Valid @RequestBody request: GroupSequenceCreateRequest): GroupSequenceResponse {
+    fun create(@Valid @RequestBody request: GroupSequenceTemplateCreateRequest): GroupSequenceTemplateResponse {
         val instructor = instructorContext.currentInstructor()
         val center = ensureOwnedCenter(request.centerId, instructor.id!!)
-        val row = GroupSequenceLog(
+        val row = GroupSequenceTemplate(
             instructor = instructor,
             center = center,
             lessonType = request.lessonType,
-            classDate = request.classDate,
+            title = request.title.trim(),
             equipmentBrand = request.equipmentBrand,
             springSetting = request.springSetting,
-            todaySequence = request.todaySequence,
-            nextSequence = request.nextSequence,
-            beforeMemo = request.beforeMemo,
-            afterMemo = request.afterMemo,
-            memberNotes = request.memberNotes
+            sequenceBody = request.sequenceBody
         )
-        return groupSequenceLogRepository.save(row).toResponse()
+        return groupSequenceTemplateRepository.save(row).toResponse()
     }
 
     private fun ensureOwnedCenter(centerId: UUID, instructorId: UUID) =
         centerRepository.findByIdAndInstructorId(centerId, instructorId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Center not found")
 
-    private fun GroupSequenceLog.toResponse() = GroupSequenceResponse(
+    private fun GroupSequenceTemplate.toResponse() = GroupSequenceTemplateResponse(
         id = id!!,
         centerId = center!!.id!!,
         lessonType = lessonType.name,
-        classDate = classDate!!,
+        title = title!!,
         equipmentBrand = equipmentBrand,
         springSetting = springSetting,
-        todaySequence = todaySequence,
-        nextSequence = nextSequence,
-        beforeMemo = beforeMemo,
-        afterMemo = afterMemo,
-        memberNotes = memberNotes,
+        sequenceBody = sequenceBody,
         createdAt = createdAt ?: Instant.now()
     )
 }
 
-data class GroupSequenceCreateRequest(
+data class GroupSequenceTemplateCreateRequest(
     @field:NotNull val centerId: UUID,
     @field:NotNull val lessonType: SessionType,
-    @field:NotNull val classDate: LocalDate,
+    @field:NotBlank @field:Size(max = 120) val title: String,
     @field:Size(max = 120) val equipmentBrand: String? = null,
     @field:Size(max = 500) val springSetting: String? = null,
-    @field:Size(max = 2000) val todaySequence: String? = null,
-    @field:Size(max = 2000) val nextSequence: String? = null,
-    @field:Size(max = 1000) val beforeMemo: String? = null,
-    @field:Size(max = 1000) val afterMemo: String? = null,
-    @field:Size(max = 2000) val memberNotes: String? = null
+    @field:Size(max = 3000) val sequenceBody: String? = null
 )
 
-data class GroupSequenceResponse(
+data class GroupSequenceTemplateResponse(
     val id: UUID,
     val centerId: UUID,
     val lessonType: String,
-    val classDate: LocalDate,
+    val title: String,
     val equipmentBrand: String?,
     val springSetting: String?,
-    val todaySequence: String?,
-    val nextSequence: String?,
-    val beforeMemo: String?,
-    val afterMemo: String?,
-    val memberNotes: String?,
+    val sequenceBody: String?,
     val createdAt: Instant
 )

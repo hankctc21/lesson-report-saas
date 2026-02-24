@@ -4,6 +4,7 @@ import {
   createCenter,
   createClient,
   createClientHomework,
+  createGroupSequenceTemplate,
   createGroupSequence,
   createReport,
   createSession,
@@ -16,6 +17,7 @@ import {
   listClientReports,
   listClients,
   listGroupSequences,
+  listGroupSequenceTemplates,
   listReportPhotos,
   listSessionsWithReportByDate,
   uploadClientProgressPhoto,
@@ -57,6 +59,7 @@ type PersonalMeta = {
 type GroupSequenceLog = {
   id: string;
   centerId: string;
+  lessonType: "PERSONAL" | "GROUP";
   classDate: string;
   equipmentBrand: string;
   springSetting: string;
@@ -100,6 +103,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<"lesson" | "member">("lesson");
   const [selectedCenterId, setSelectedCenterId] = useState<string>("");
   const [newCenterName, setNewCenterName] = useState("");
+  const [lessonTypeFilter, setLessonTypeFilter] = useState<"ALL" | "PERSONAL" | "GROUP">("ALL");
   const [sessionStartHour, setSessionStartHour] = useState("");
   const [sessionStartMinute, setSessionStartMinute] = useState("00");
   const [showReportedSession, setShowReportedSession] = useState(false);
@@ -127,6 +131,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [personalMetaDraft, setPersonalMetaDraft] = useState<PersonalMeta>(PERSONAL_META_EMPTY);
   const [groupDraft, setGroupDraft] = useState<Omit<GroupSequenceLog, "id" | "createdAt">>({
     centerId: selectedCenterId,
+    lessonType: "GROUP",
     classDate: today,
     equipmentBrand: "",
     springSetting: "",
@@ -136,6 +141,8 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     afterMemo: "",
     memberNotes: ""
   });
+  const [templateTitle, setTemplateTitle] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
 
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: health, refetchInterval: 15000 });
@@ -166,8 +173,13 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     enabled: !!selectedMemberId
   });
   const groupSequencesQuery = useQuery({
-    queryKey: ["group-sequences", selectedCenterId],
-    queryFn: () => listGroupSequences(selectedCenterId),
+    queryKey: ["group-sequences", selectedCenterId, lessonTypeFilter],
+    queryFn: () => listGroupSequences(selectedCenterId, lessonTypeFilter === "ALL" ? undefined : lessonTypeFilter),
+    enabled: !!selectedCenterId
+  });
+  const groupSequenceTemplatesQuery = useQuery({
+    queryKey: ["group-sequence-templates", selectedCenterId, groupDraft.lessonType],
+    queryFn: () => listGroupSequenceTemplates(selectedCenterId, groupDraft.lessonType),
     enabled: !!selectedCenterId
   });
   const clientProgressPhotosQuery = useQuery({
@@ -194,8 +206,9 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const sessionsForSelectedMember = useMemo(() => {
     const rows = sessionsQuery.data || [];
     const byMember = rows.filter((s) => s.clientId === selectedMemberId);
-    return showReportedSession ? byMember : byMember.filter((s) => !s.hasReport);
-  }, [sessionsQuery.data, selectedMemberId, showReportedSession]);
+    const byType = lessonTypeFilter === "ALL" ? byMember : byMember.filter((s) => s.type === lessonTypeFilter);
+    return showReportedSession ? byType : byType.filter((s) => !s.hasReport);
+  }, [sessionsQuery.data, selectedMemberId, showReportedSession, lessonTypeFilter]);
 
   const selectedSession = useMemo(
     () => (sessionsQuery.data || []).find((s) => s.id === selectedSessionId) || null,
@@ -312,6 +325,14 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     mutationFn: createGroupSequence,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["group-sequences", selectedCenterId] });
+    }
+  });
+  const createGroupSequenceTemplateMutation = useMutation({
+    mutationFn: createGroupSequenceTemplate,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["group-sequence-templates", selectedCenterId, groupDraft.lessonType] });
+      setTemplateTitle("");
+      setNotice("시퀀스 템플릿을 저장했습니다.");
     }
   });
   const uploadClientProgressPhotoMutation = useMutation({
@@ -432,6 +453,18 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       nextLessonPlan: p.nextLessonPlan || ""
     }));
   }, [clientProfileQuery.data]);
+
+  useEffect(() => {
+    if (!selectedTemplateId) return;
+    const t = (groupSequenceTemplatesQuery.data || []).find((x) => x.id === selectedTemplateId);
+    if (!t) return;
+    setGroupDraft((prev) => ({
+      ...prev,
+      equipmentBrand: t.equipmentBrand || "",
+      springSetting: t.springSetting || "",
+      todaySequence: t.sequenceBody || prev.todaySequence
+    }));
+  }, [selectedTemplateId, groupSequenceTemplatesQuery.data]);
 
   useEffect(() => {
     return () => {
@@ -675,6 +708,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     const fd = new FormData(e.currentTarget);
     const entry: Omit<GroupSequenceLog, "id" | "createdAt"> = {
       centerId: selectedCenterId,
+      lessonType: groupDraft.lessonType,
       classDate: String(fd.get("classDate") || today),
       equipmentBrand: String(fd.get("equipmentBrand") || ""),
       springSetting: String(fd.get("springSetting") || ""),
@@ -687,6 +721,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     createGroupSequenceMutation.mutate(entry);
     setGroupDraft({
       centerId: selectedCenterId,
+      lessonType: groupDraft.lessonType,
       classDate: today,
       equipmentBrand: "",
       springSetting: "",
@@ -697,6 +732,27 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       memberNotes: ""
     });
     setNotice("그룹 시퀀스 기록을 저장했습니다.");
+  };
+
+  const onSaveSequenceTemplate = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedCenterId) {
+      setNotice("먼저 센터를 선택해주세요.");
+      return;
+    }
+    const title = templateTitle.trim();
+    if (!title) {
+      setNotice("템플릿 제목을 입력해주세요.");
+      return;
+    }
+    createGroupSequenceTemplateMutation.mutate({
+      centerId: selectedCenterId,
+      lessonType: groupDraft.lessonType,
+      title,
+      equipmentBrand: groupDraft.equipmentBrand || undefined,
+      springSetting: groupDraft.springSetting || undefined,
+      sequenceBody: groupDraft.todaySequence || undefined
+    });
   };
 
   const applyQuickDraft = () => {
@@ -979,6 +1035,14 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         </Card>
 
         <div className="space-y-4">
+          <Card title="수업 타입 필터">
+            <div className="flex gap-2 text-sm">
+              <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "ALL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("ALL")}>전체</button>
+              <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "PERSONAL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("PERSONAL")}>개인</button>
+              <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "GROUP" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("GROUP")}>그룹</button>
+            </div>
+          </Card>
+
           <Card title="세션 등록">
             <div className="mb-2 text-sm text-slate-600">
               선택 회원: <b>{selectedClient?.name || "없음"}</b>
@@ -1037,6 +1101,13 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
             <p className="mb-2 text-xs text-slate-500">개인/그룹 모두 같은 시퀀스 기록을 사용하고, 수업 형태로 구분합니다.</p>
             <form className="grid gap-2 md:grid-cols-2" onSubmit={onSaveGroupSequence}>
               <div>
+                <p className="mb-1 text-[11px] text-slate-500">수업 형태</p>
+                <select className="field" value={groupDraft.lessonType} onChange={(e) => setGroupDraft((p) => ({ ...p, lessonType: e.target.value as "PERSONAL" | "GROUP" }))}>
+                  <option value="PERSONAL">개인</option>
+                  <option value="GROUP">그룹</option>
+                </select>
+              </div>
+              <div>
                 <p className="mb-1 text-[11px] text-slate-500">수업 날짜</p>
                 <input name="classDate" type="date" className="field" value={groupDraft.classDate} onChange={(e) => setGroupDraft((p) => ({ ...p, classDate: e.target.value }))} />
               </div>
@@ -1058,6 +1129,25 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               </div>
               <button className="btn md:col-span-2">시퀀스 저장</button>
             </form>
+
+            <form className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]" onSubmit={onSaveSequenceTemplate}>
+              <input className="field" value={templateTitle} onChange={(e) => setTemplateTitle(e.target.value)} placeholder="템플릿 제목 (예: 허리안정 입문)" />
+              <button className="rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700" disabled={createGroupSequenceTemplateMutation.isPending}>
+                {createGroupSequenceTemplateMutation.isPending ? "저장중..." : "템플릿 저장"}
+              </button>
+            </form>
+
+            <div className="mt-2 grid gap-2 md:grid-cols-[1fr_auto]">
+              <select className="field" value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
+                <option value="">템플릿 불러오기</option>
+                {(groupSequenceTemplatesQuery.data || []).map((t) => (
+                  <option key={t.id} value={t.id}>{t.title}</option>
+                ))}
+              </select>
+              <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700" onClick={() => setSelectedTemplateId("")}>
+                선택 해제
+              </button>
+            </div>
           </Card>
 
           <Card title="리포트 등록" className={newSessionCue ? "ring-2 ring-slate-300 animate-pulse" : ""}>
@@ -1268,6 +1358,19 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               )}
             </Card>
           </section>
+
+          <Card title="시퀀스 목록">
+            <ul className="max-h-[32vh] space-y-2 overflow-y-auto pr-1 text-sm">
+              {groupLogsByCenter.map((g) => (
+                <li key={g.id} className="rounded-lg border border-slate-200 bg-white/80 p-3">
+                  <p className="font-medium text-slate-900">{g.classDate} / {g.lessonType === "PERSONAL" ? "개인" : "그룹"} / {g.equipmentBrand || "기구 미입력"}</p>
+                  <p className="text-xs text-slate-500">스프링: {g.springSetting || "-"}</p>
+                  <p className="text-xs text-slate-600">오늘: {toShort(g.todaySequence || "-", 80)}</p>
+                </li>
+              ))}
+              {!groupLogsByCenter.length && <p className="text-xs text-slate-500">현재 조건의 시퀀스 기록이 없습니다.</p>}
+            </ul>
+          </Card>
         </div>
       </section>
       ) : (
@@ -1301,46 +1404,105 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
           </ul>
         </Card>
 
-        <Card title="회원 추적(개인 특화)">
-          <div className="mb-2 text-sm text-slate-600">
-            선택 회원: <b>{selectedClient?.name || "없음"}</b>
-          </div>
-          <form key={selectedMemberId || "no-client"} className="grid gap-2 md:grid-cols-2" onSubmit={onSavePersonalMeta}>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">아픈 부위/증상</p>
-              <textarea name="painNote" className="field min-h-16" value={personalMetaDraft.painNote} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, painNote: e.target.value }))} />
+        <div className="space-y-4">
+          <Card title="회원 추적(개인 특화)">
+            <div className="mb-2 text-sm text-slate-600">
+              선택 회원: <b>{selectedClient?.name || "없음"}</b>
             </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">목표</p>
-              <textarea name="goalNote" className="field min-h-16" value={personalMetaDraft.goalNote} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, goalNote: e.target.value }))} />
+            <form key={selectedMemberId || "no-client"} className="grid gap-2 md:grid-cols-2" onSubmit={onSavePersonalMeta}>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">아픈 부위/증상</p>
+                <textarea name="painNote" className="field min-h-16" value={personalMetaDraft.painNote} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, painNote: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">목표</p>
+                <textarea name="goalNote" className="field min-h-16" value={personalMetaDraft.goalNote} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, goalNote: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">수술 이력</p>
+                <textarea name="surgeryHistory" className="field min-h-16" value={personalMetaDraft.surgeryHistory} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, surgeryHistory: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">수업 전 메모</p>
+                <textarea name="beforeClassMemo" className="field min-h-16" value={personalMetaDraft.beforeClassMemo} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, beforeClassMemo: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">수업 후 기록</p>
+                <textarea name="afterClassMemo" className="field min-h-16" value={personalMetaDraft.afterClassMemo} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, afterClassMemo: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">다음 레슨 계획</p>
+                <textarea name="nextLessonPlan" className="field min-h-16" value={personalMetaDraft.nextLessonPlan} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, nextLessonPlan: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">이번 숙제</p>
+                <input name="homeworkGiven" className="field" value={personalMetaDraft.homeworkGiven} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkGiven: e.target.value }))} />
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">숙제 알림 시각</p>
+                <input name="homeworkReminderAt" type="datetime-local" className="field" value={personalMetaDraft.homeworkReminderAt} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkReminderAt: e.target.value }))} />
+              </div>
+              <button className="btn md:col-span-2" disabled={!selectedMemberId}>회원 추적 저장</button>
+            </form>
+          </Card>
+
+          <Card title="숙제 목록">
+            <ul className="max-h-[24vh] space-y-2 overflow-y-auto pr-1 text-sm">
+              {(clientHomeworksQuery.data || []).map((h) => (
+                <li key={h.id} className="rounded-lg border border-slate-200 bg-white/80 p-2">
+                  <p className="font-medium text-slate-900">{h.content}</p>
+                  <p className="text-xs text-slate-500">
+                    생성: {formatDateTime(h.createdAt)} {h.remindAt ? `/ 알림: ${formatDateTime(h.remindAt)}` : ""}
+                  </p>
+                </li>
+              ))}
+              {!selectedMemberId && <p className="text-xs text-slate-500">회원을 선택하면 숙제 목록이 표시됩니다.</p>}
+              {!!selectedMemberId && !(clientHomeworksQuery.data || []).length && <p className="text-xs text-slate-500">등록된 숙제가 없습니다.</p>}
+            </ul>
+          </Card>
+
+          <Card title="비포/애프터 사진">
+            <form className="grid gap-2 md:grid-cols-4" onSubmit={onUploadClientProgressPhoto}>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">구분</p>
+                <select className="field" value={progressPhotoPhase} onChange={(e) => setProgressPhotoPhase(e.target.value as "BEFORE" | "AFTER" | "ETC")}>
+                  <option value="BEFORE">비포</option>
+                  <option value="AFTER">애프터</option>
+                  <option value="ETC">기타</option>
+                </select>
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] text-slate-500">촬영일</p>
+                <input className="field" type="date" value={progressPhotoTakenOn} onChange={(e) => setProgressPhotoTakenOn(e.target.value)} />
+              </div>
+              <div className="md:col-span-2">
+                <p className="mb-1 text-[11px] text-slate-500">메모</p>
+                <input className="field" value={progressPhotoNote} onChange={(e) => setProgressPhotoNote(e.target.value)} placeholder="예: 체형 정렬 체크" />
+              </div>
+              <input name="clientProgressPhoto" type="file" accept="image/*" className="field md:col-span-3" />
+              <button className="btn md:col-span-1" disabled={uploadClientProgressPhotoMutation.isPending || !selectedMemberId}>
+                {uploadClientProgressPhotoMutation.isPending ? "업로드중..." : "사진 업로드"}
+              </button>
+            </form>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+              {(clientProgressPhotosQuery.data || []).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="overflow-hidden rounded-lg border border-slate-200 bg-white/80 text-left"
+                  onClick={() => setSelectedPhotoPreview(clientProgressPhotoUrls[p.id] || p.imageUrl)}
+                >
+                  <img src={clientProgressPhotoUrls[p.id] || p.imageUrl} alt={p.fileName} className="h-24 w-full object-cover" />
+                  <div className="p-2">
+                    <p className="text-[11px] font-semibold text-slate-700">{p.phase}</p>
+                    <p className="text-[11px] text-slate-500">{p.takenOn || "-"}</p>
+                  </div>
+                </button>
+              ))}
             </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">수술 이력</p>
-              <textarea name="surgeryHistory" className="field min-h-16" value={personalMetaDraft.surgeryHistory} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, surgeryHistory: e.target.value }))} />
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">수업 전 메모</p>
-              <textarea name="beforeClassMemo" className="field min-h-16" value={personalMetaDraft.beforeClassMemo} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, beforeClassMemo: e.target.value }))} />
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">수업 후 기록</p>
-              <textarea name="afterClassMemo" className="field min-h-16" value={personalMetaDraft.afterClassMemo} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, afterClassMemo: e.target.value }))} />
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">다음 레슨 계획</p>
-              <textarea name="nextLessonPlan" className="field min-h-16" value={personalMetaDraft.nextLessonPlan} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, nextLessonPlan: e.target.value }))} />
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">이번 숙제</p>
-              <input name="homeworkGiven" className="field" value={personalMetaDraft.homeworkGiven} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkGiven: e.target.value }))} />
-            </div>
-            <div>
-              <p className="mb-1 text-[11px] text-slate-500">숙제 알림 시각</p>
-              <input name="homeworkReminderAt" type="datetime-local" className="field" value={personalMetaDraft.homeworkReminderAt} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkReminderAt: e.target.value }))} />
-            </div>
-            <button className="btn md:col-span-2" disabled={!selectedMemberId}>회원 추적 저장</button>
-          </form>
-        </Card>
+          </Card>
+        </div>
       </section>
       )}
 
