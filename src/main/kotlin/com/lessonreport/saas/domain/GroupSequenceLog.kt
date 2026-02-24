@@ -30,12 +30,19 @@ open class GroupSequenceLog(
     @JoinColumn(name = "center_id", nullable = false)
     open var center: Center? = null,
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "session_id")
+    open var session: LessonSession? = null,
+
     @Enumerated(jakarta.persistence.EnumType.STRING)
     @Column(name = "lesson_type", nullable = false, length = 20)
     open var lessonType: SessionType = SessionType.GROUP,
 
     @Column(name = "class_date", nullable = false)
     open var classDate: LocalDate? = null,
+
+    @Column(name = "equipment_type", length = 40)
+    open var equipmentType: String? = null,
 
     @Column(name = "equipment_brand", length = 120)
     open var equipmentBrand: String? = null,

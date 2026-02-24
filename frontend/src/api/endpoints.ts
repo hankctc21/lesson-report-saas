@@ -90,8 +90,10 @@ export const listGroupSequences = async (centerId: string, lessonType?: "PERSONA
 
 export const createGroupSequence = async (payload: {
   centerId: string;
+  sessionId?: string;
   lessonType: "PERSONAL" | "GROUP";
   classDate: string;
+  equipmentType?: string;
   equipmentBrand?: string;
   springSetting?: string;
   todaySequence?: string;

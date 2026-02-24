@@ -4,6 +4,7 @@ import com.lessonreport.saas.domain.GroupSequenceLog
 import com.lessonreport.saas.domain.SessionType
 import com.lessonreport.saas.repository.CenterRepository
 import com.lessonreport.saas.repository.GroupSequenceLogRepository
+import com.lessonreport.saas.repository.LessonSessionRepository
 import com.lessonreport.saas.service.InstructorContext
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotNull
@@ -26,6 +27,7 @@ import java.util.UUID
 class GroupSequenceController(
     private val groupSequenceLogRepository: GroupSequenceLogRepository,
     private val centerRepository: CenterRepository,
+    private val lessonSessionRepository: LessonSessionRepository,
     private val instructorContext: InstructorContext
 ) {
     @GetMapping
@@ -46,11 +48,17 @@ class GroupSequenceController(
     fun create(@Valid @RequestBody request: GroupSequenceCreateRequest): GroupSequenceResponse {
         val instructor = instructorContext.currentInstructor()
         val center = ensureOwnedCenter(request.centerId, instructor.id!!)
+        val session = request.sessionId?.let {
+            lessonSessionRepository.findByIdAndInstructorId(it, instructor.id!!)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found")
+        }
         val row = GroupSequenceLog(
             instructor = instructor,
             center = center,
-            lessonType = request.lessonType,
-            classDate = request.classDate,
+            session = session,
+            lessonType = session?.sessionType ?: request.lessonType,
+            classDate = session?.sessionDate ?: request.classDate,
+            equipmentType = request.equipmentType,
             equipmentBrand = request.equipmentBrand,
             springSetting = request.springSetting,
             todaySequence = request.todaySequence,
@@ -69,9 +77,12 @@ class GroupSequenceController(
     private fun GroupSequenceLog.toResponse() = GroupSequenceResponse(
         id = id!!,
         centerId = center!!.id!!,
+        sessionId = session?.id,
         lessonType = lessonType.name,
         classDate = classDate!!,
+        equipmentType = equipmentType,
         equipmentBrand = equipmentBrand,
+        sessionStartTime = session?.sessionStartTime?.toString(),
         springSetting = springSetting,
         todaySequence = todaySequence,
         nextSequence = nextSequence,
@@ -84,8 +95,10 @@ class GroupSequenceController(
 
 data class GroupSequenceCreateRequest(
     @field:NotNull val centerId: UUID,
+    val sessionId: UUID? = null,
     @field:NotNull val lessonType: SessionType,
     @field:NotNull val classDate: LocalDate,
+    @field:Size(max = 40) val equipmentType: String? = null,
     @field:Size(max = 120) val equipmentBrand: String? = null,
     @field:Size(max = 500) val springSetting: String? = null,
     @field:Size(max = 2000) val todaySequence: String? = null,
@@ -98,9 +111,12 @@ data class GroupSequenceCreateRequest(
 data class GroupSequenceResponse(
     val id: UUID,
     val centerId: UUID,
+    val sessionId: UUID?,
     val lessonType: String,
     val classDate: LocalDate,
+    val equipmentType: String?,
     val equipmentBrand: String?,
+    val sessionStartTime: String?,
     val springSetting: String?,
     val todaySequence: String?,
     val nextSequence: String?,

@@ -44,9 +44,12 @@ export type Homework = {
 export type GroupSequence = {
   id: string;
   centerId: string;
+  sessionId?: string;
   lessonType: "PERSONAL" | "GROUP";
   classDate: string;
+  equipmentType?: string;
   equipmentBrand?: string;
+  sessionStartTime?: string;
   springSetting?: string;
   todaySequence?: string;
   nextSequence?: string;
