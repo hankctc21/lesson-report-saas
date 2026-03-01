@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createCenter,
   createClient,
-  createClientHomework,
   createClientTrackingLog,
+  deleteCenter,
   deleteClientProgressPhoto,
   createGroupSequenceTemplate,
   createGroupSequence,
@@ -15,7 +15,6 @@ import {
   getClientProfile,
   health,
   listCenters,
-  listClientHomeworks,
   listClientTrackingLogs,
   listClientProgressPhotos,
   listClientReports,
@@ -23,11 +22,13 @@ import {
   listGroupSequences,
   listGroupSequenceTemplates,
   listReportPhotos,
+  listSessionsWithReportByRange,
   listSessionsWithReportByDate,
   uploadClientProgressPhoto,
   updateClientProgressPhoto,
   uploadReportPhoto,
   upsertClientProfile,
+  updateCenter,
   updateClient,
   updateReport
 } from "../api/endpoints";
@@ -38,6 +39,9 @@ type ReportDraft = {
   strengthNote: string;
   improveNote: string;
   nextGoal: string;
+  homework: string;
+  homeworkReminderAt: string;
+  homeworkCompleted: boolean;
 };
 
 type ClientEditDraft = {
@@ -72,8 +76,6 @@ type PersonalMeta = {
   beforeClassMemo: string;
   afterClassMemo: string;
   nextLessonPlan: string;
-  homeworkGiven: string;
-  homeworkReminderAt: string;
 };
 type GroupSequenceLog = {
   id: string;
@@ -93,12 +95,23 @@ type GroupSequenceLog = {
   createdAt: string;
 };
 
-const EMPTY_DRAFT: ReportDraft = {
+type LocalDateTimeParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: string;
+  minute: string;
+};
+
+const createEmptyDraft = (): ReportDraft => ({
   summaryItems: "",
   strengthNote: "",
   improveNote: "",
-  nextGoal: ""
-};
+  nextGoal: "",
+  homework: "",
+  homeworkReminderAt: currentLocalDateTimeRounded10(),
+  homeworkCompleted: false
+});
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
 const MINUTE_OPTIONS = ["00", "10", "20", "30", "40", "50"];
@@ -115,15 +128,42 @@ const EQUIPMENT_OPTIONS: Array<{ value: string; label: string; hasSpring: boolea
   { value: "MAT", label: "매트", hasSpring: false }
 ];
 const DEFAULT_BRANDS = ["한국필라테스", "모션케어"];
+type CalendarView = "month" | "week" | "day";
+type SequenceMove = {
+  id: string;
+  name: string;
+  focus: string;
+  level: "입문" | "중급" | "고급";
+};
+const PILATES_MOVE_LIBRARY: SequenceMove[] = [
+  { id: "hundred", name: "Hundred", focus: "호흡/코어 워밍업", level: "입문" },
+  { id: "roll-up", name: "Roll Up", focus: "척추 분절/복부", level: "입문" },
+  { id: "roll-over", name: "Roll Over", focus: "척추 유연성/복부", level: "중급" },
+  { id: "single-leg-circle", name: "Single Leg Circle", focus: "고관절 안정", level: "입문" },
+  { id: "rolling-like-a-ball", name: "Rolling Like a Ball", focus: "코어 밸런스", level: "입문" },
+  { id: "single-leg-stretch", name: "Single Leg Stretch", focus: "복부/골반 안정", level: "입문" },
+  { id: "double-leg-stretch", name: "Double Leg Stretch", focus: "복부 지구력", level: "입문" },
+  { id: "spine-stretch-forward", name: "Spine Stretch Forward", focus: "햄스트링/척추", level: "입문" },
+  { id: "open-leg-rocker", name: "Open Leg Rocker", focus: "밸런스/코어", level: "중급" },
+  { id: "saw", name: "Saw", focus: "회전/햄스트링", level: "입문" },
+  { id: "swan", name: "Swan", focus: "흉추 신전/등", level: "입문" },
+  { id: "side-kick-series", name: "Side Kick Series", focus: "둔근/측면 안정", level: "입문" },
+  { id: "teaser", name: "Teaser", focus: "전신 코어 컨트롤", level: "고급" },
+  { id: "seal", name: "Seal", focus: "척추 가동/코어", level: "중급" },
+  { id: "hip-twist", name: "Hip Twist", focus: "복사근/회전 안정", level: "중급" },
+  { id: "leg-pull-front", name: "Leg Pull Front", focus: "어깨 안정/코어", level: "중급" },
+  { id: "leg-pull-back", name: "Leg Pull Back", focus: "후면 사슬/어깨", level: "중급" },
+  { id: "knee-stretch", name: "Knee Stretch", focus: "리포머 코어", level: "입문" },
+  { id: "footwork", name: "Footwork", focus: "하지 정렬/기초", level: "입문" },
+  { id: "elephant", name: "Elephant", focus: "햄스트링/견갑 안정", level: "중급" }
+];
 const PERSONAL_META_EMPTY: PersonalMeta = {
   painNote: "",
   goalNote: "",
   surgeryHistory: "",
   beforeClassMemo: "",
   afterClassMemo: "",
-  nextLessonPlan: "",
-  homeworkGiven: "",
-  homeworkReminderAt: ""
+  nextLessonPlan: ""
 };
 
 export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
@@ -131,6 +171,11 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const today = new Date().toISOString().slice(0, 10);
 
   const [sessionDate, setSessionDate] = useState(today);
+  const [calendarFocusDate, setCalendarFocusDate] = useState(today);
+  const [calendarMonth, setCalendarMonth] = useState(today.slice(0, 7));
+  const [calendarView, setCalendarView] = useState<CalendarView>("week");
+  const [calendarQuickOpen, setCalendarQuickOpen] = useState(false);
+  const [calendarQuickTargetDate, setCalendarQuickTargetDate] = useState(today);
   const [memberSearch, setMemberSearch] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState("");
@@ -140,17 +185,20 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<"lesson" | "member">("lesson");
   const [selectedCenterId, setSelectedCenterId] = useState<string>("");
   const [newCenterName, setNewCenterName] = useState("");
+  const [editingCenterId, setEditingCenterId] = useState("");
+  const [editingCenterName, setEditingCenterName] = useState("");
   const [lessonTypeFilter, setLessonTypeFilter] = useState<"ALL" | "PERSONAL" | "GROUP">("ALL");
   const [memberStatusFilter, setMemberStatusFilter] = useState<"ALL" | "CURRENT" | "PAUSED" | "FORMER">("ALL");
   const [sessionStartHour, setSessionStartHour] = useState("");
   const [sessionStartMinute, setSessionStartMinute] = useState("00");
+  const [sessionRepeatWeeks, setSessionRepeatWeeks] = useState<0 | 4 | 8>(0);
   const [showReportedSession, setShowReportedSession] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [showCenterForm, setShowCenterForm] = useState(false);
   const [activeLessonForm, setActiveLessonForm] = useState<"session" | "work" | null>(null);
   const [activeWorkPane, setActiveWorkPane] = useState<"sequence" | "report">("sequence");
-  const [showMemberEditForm, setShowMemberEditForm] = useState(false);
-  const [showReportEditForm, setShowReportEditForm] = useState(false);
+  const [memberEditField, setMemberEditField] = useState<keyof ClientEditDraft | "">("");
+  const [reportEditField, setReportEditField] = useState<keyof ReportDraft | "">("");
   const [showSequenceEditForm, setShowSequenceEditForm] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
   const [sharePublicUrl, setSharePublicUrl] = useState("");
@@ -160,7 +208,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const [pendingSessionAutoSelectId, setPendingSessionAutoSelectId] = useState("");
   const [lastSavedSessionId, setLastSavedSessionId] = useState("");
   const [suppressHasReportWarning, setSuppressHasReportWarning] = useState(false);
-  const [draft, setDraft] = useState<ReportDraft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<ReportDraft>(() => createEmptyDraft());
   const [clientEditDraft, setClientEditDraft] = useState<ClientEditDraft>({
     name: "",
     centerId: "",
@@ -172,10 +220,9 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   });
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
-  const [lastSelectedClientIndex, setLastSelectedClientIndex] = useState<number | null>(null);
   const [bulkCenterId, setBulkCenterId] = useState("");
   const [bulkLessonType, setBulkLessonType] = useState<"" | "PERSONAL" | "GROUP">("");
-  const [reportEditDraft, setReportEditDraft] = useState<ReportDraft>(EMPTY_DRAFT);
+  const [reportEditDraft, setReportEditDraft] = useState<ReportDraft>(() => createEmptyDraft());
   const [activeVoiceField, setActiveVoiceField] = useState<keyof ReportDraft | null>(null);
   const [selectedPhotoPreview, setSelectedPhotoPreview] = useState("");
   const [selectedSequenceDetail, setSelectedSequenceDetail] = useState<GroupSequenceLog | null>(null);
@@ -225,6 +272,10 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   });
   const [templateTitle, setTemplateTitle] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [sequenceMoveSearch, setSequenceMoveSearch] = useState("");
+  const [selectedMoveIds, setSelectedMoveIds] = useState<string[]>([]);
+  const [customMoveInput, setCustomMoveInput] = useState("");
+  const [customMoveLibrary, setCustomMoveLibrary] = useState<string[]>([]);
   const [customEquipmentHasSpring, setCustomEquipmentHasSpring] = useState(true);
   const [isCustomEquipmentInput, setIsCustomEquipmentInput] = useState(false);
   const [sequenceBrandMode, setSequenceBrandMode] = useState<"preset" | "custom">("preset");
@@ -235,10 +286,24 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   const healthQuery = useQuery({ queryKey: ["health"], queryFn: health, refetchInterval: 15000 });
   const centersQuery = useQuery({ queryKey: ["centers"], queryFn: listCenters });
-  const clientsQuery = useQuery({ queryKey: ["clients", selectedCenterId], queryFn: () => listClients(selectedCenterId || undefined) });
+  const clientsQuery = useQuery({ queryKey: ["clients"], queryFn: () => listClients(undefined) });
   const sessionsQuery = useQuery({
     queryKey: ["sessions-with-report", sessionDate],
     queryFn: () => listSessionsWithReportByDate(sessionDate)
+  });
+  const monthSessionRange = useMemo(() => getMonthRange(calendarMonth), [calendarMonth]);
+  const monthSessionsQuery = useQuery({
+    queryKey: ["sessions-with-report-range", monthSessionRange.from, monthSessionRange.to],
+    queryFn: () => listSessionsWithReportByRange(monthSessionRange.from, monthSessionRange.to)
+  });
+  const calendarRange = useMemo(() => {
+    if (calendarView === "week") return getWeekRange(calendarFocusDate);
+    if (calendarView === "day") return { from: calendarFocusDate, to: calendarFocusDate };
+    return getMonthRange(calendarFocusDate.slice(0, 7));
+  }, [calendarFocusDate, calendarView]);
+  const calendarSessionsQuery = useQuery({
+    queryKey: ["sessions-with-report-range-calendar", calendarRange.from, calendarRange.to],
+    queryFn: () => listSessionsWithReportByRange(calendarRange.from, calendarRange.to)
   });
   const reportsQuery = useQuery({
     queryKey: ["reports", selectedMemberId],
@@ -253,11 +318,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const clientProfileQuery = useQuery({
     queryKey: ["client-profile", selectedMemberId],
     queryFn: () => getClientProfile(selectedMemberId),
-    enabled: !!selectedMemberId
-  });
-  const clientHomeworksQuery = useQuery({
-    queryKey: ["client-homeworks", selectedMemberId],
-    queryFn: () => listClientHomeworks(selectedMemberId),
     enabled: !!selectedMemberId
   });
   const clientTrackingLogsQuery = useQuery({
@@ -297,37 +357,81 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   );
   const filteredClients = useMemo(() => {
     const q = memberSearch.trim().toLowerCase();
-    const base = memberStatusFilter === "ALL" ? clients : clients.filter((c) => (c.memberStatus || "CURRENT") === memberStatusFilter);
+    const byCenter = selectedCenterId ? clients.filter((c) => c.centerId === selectedCenterId) : clients;
+    const base = memberStatusFilter === "ALL" ? byCenter : byCenter.filter((c) => (c.memberStatus || "CURRENT") === memberStatusFilter);
     if (!q) return base;
     return base.filter((c) => c.name.toLowerCase().includes(q) || (c.phone || "").includes(q));
-  }, [clients, memberSearch, memberStatusFilter]);
+  }, [clients, memberSearch, memberStatusFilter, selectedCenterId]);
   const selectedClientIdSet = useMemo(() => new Set(selectedClientIds), [selectedClientIds]);
   const memberListRowHeight = 40;
   const memberListMaxVisible = 6;
   const memberListHeight = Math.min(filteredClients.length, memberListMaxVisible) * memberListRowHeight || memberListRowHeight;
 
   const selectedClient = useMemo(() => clients.find((c) => c.id === selectedMemberId) || null, [clients, selectedMemberId]);
+  const clientById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
   const selectedClientCenterName = useMemo(
     () => centers.find((x) => x.id === selectedClient?.centerId)?.name || "-",
     [centers, selectedClient?.centerId]
   );
 
-  const sessionsForSelectedMember = useMemo(() => {
+  const daySessionOptions = useMemo(() => {
     const rows = sessionsQuery.data || [];
-    const byMember = rows.filter((s) => s.clientId === selectedMemberId);
-    const byType = lessonTypeFilter === "ALL" ? byMember : byMember.filter((s) => s.type === lessonTypeFilter);
+    const byType = lessonTypeFilter === "ALL" ? rows : rows.filter((s) => s.type === lessonTypeFilter);
     return showReportedSession ? byType : byType.filter((s) => !s.hasReport);
-  }, [sessionsQuery.data, selectedMemberId, showReportedSession, lessonTypeFilter]);
+  }, [sessionsQuery.data, showReportedSession, lessonTypeFilter]);
   const timelineSessions = useMemo(() => {
     const rows = sessionsQuery.data || [];
-    const byMember = rows.filter((s) => s.clientId === selectedMemberId);
-    const byType = lessonTypeFilter === "ALL" ? byMember : byMember.filter((s) => s.type === lessonTypeFilter);
+    const byType = lessonTypeFilter === "ALL" ? rows : rows.filter((s) => s.type === lessonTypeFilter);
+    return [...byType].sort((a, b) => {
+      const ak = `${a.startTime || "99:99"} ${a.createdAt}`;
+      const bk = `${b.startTime || "99:99"} ${b.createdAt}`;
+      return ak < bk ? -1 : ak > bk ? 1 : 0;
+    });
+  }, [sessionsQuery.data, lessonTypeFilter]);
+  const monthSessionsForCalendar = useMemo(() => {
+    const rows = monthSessionsQuery.data || [];
+    return lessonTypeFilter === "ALL" ? rows : rows.filter((s) => s.type === lessonTypeFilter);
+  }, [monthSessionsQuery.data, lessonTypeFilter]);
+  const calendarSessions = useMemo(() => {
+    const rows = calendarSessionsQuery.data || [];
+    const byType = lessonTypeFilter === "ALL" ? rows : rows.filter((s) => s.type === lessonTypeFilter);
     return [...byType].sort((a, b) => {
       const ak = `${a.date} ${a.startTime || "00:00"} ${a.createdAt}`;
       const bk = `${b.date} ${b.startTime || "00:00"} ${b.createdAt}`;
       return ak < bk ? 1 : -1;
     });
-  }, [sessionsQuery.data, selectedMemberId, lessonTypeFilter]);
+  }, [calendarSessionsQuery.data, lessonTypeFilter]);
+  const calendarDayStatus = useMemo(() => {
+    return calendarSessions.reduce<Record<string, { total: number; report: number; homework: number; homeworkDone: number }>>((acc, s) => {
+      const key = s.date;
+      const cur = acc[key] || { total: 0, report: 0, homework: 0, homeworkDone: 0 };
+      cur.total += 1;
+      if (s.hasReport) cur.report += 1;
+      if (s.hasHomework) cur.homework += 1;
+      if (s.hasHomework && s.homeworkCompleted) cur.homeworkDone += 1;
+      acc[key] = cur;
+      return acc;
+    }, {});
+  }, [calendarSessions]);
+  const calendarSessionsByDate = useMemo(
+    () => calendarSessions.reduce<Record<string, typeof calendarSessions>>((acc, s) => {
+      (acc[s.date] ||= []).push(s);
+      return acc;
+    }, {}),
+    [calendarSessions]
+  );
+  const monthDayStatus = useMemo(() => {
+    return monthSessionsForCalendar.reduce<Record<string, { total: number; report: number; homework: number; homeworkDone: number }>>((acc, s) => {
+      const key = s.date;
+      const cur = acc[key] || { total: 0, report: 0, homework: 0, homeworkDone: 0 };
+      cur.total += 1;
+      if (s.hasReport) cur.report += 1;
+      if (s.hasHomework) cur.homework += 1;
+      if (s.hasHomework && s.homeworkCompleted) cur.homeworkDone += 1;
+      acc[key] = cur;
+      return acc;
+    }, {});
+  }, [monthSessionsForCalendar]);
 
   const selectedSession = useMemo(
     () => (sessionsQuery.data || []).find((s) => s.id === selectedSessionId) || null,
@@ -339,6 +443,19 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   );
 
   const reports = useMemo(() => reportsQuery.data || [], [reportsQuery.data]);
+  const previousHomeworkOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return reports
+      .filter((r) => !!r.homework?.trim())
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map((r) => r.homework!.trim())
+      .filter((value) => {
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      })
+      .slice(0, 12);
+  }, [reports]);
   const selectedReport = useMemo(() => reports.find((r) => r.id === selectedReportId) || null, [reports, selectedReportId]);
   const reportBySessionId = useMemo(
     () => Object.fromEntries(reports.map((r) => [r.sessionId, r])),
@@ -347,6 +464,14 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const sequenceBySessionId = useMemo(
     () => Object.fromEntries((groupSequencesQuery.data || []).filter((g) => !!g.sessionId).map((g) => [g.sessionId as string, g])),
     [groupSequencesQuery.data]
+  );
+  const calendarDayOverview = useMemo(
+    () => summarizeDayOverview(calendarSessions, sequenceBySessionId),
+    [calendarSessions, sequenceBySessionId]
+  );
+  const monthDayOverview = useMemo(
+    () => summarizeDayOverview(monthSessionsForCalendar, sequenceBySessionId),
+    [monthSessionsForCalendar, sequenceBySessionId]
   );
   const beforeProgressPhotos = useMemo(
     () => (clientProgressPhotosQuery.data || []).filter((p) => p.phase === "BEFORE"),
@@ -360,25 +485,19 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     () => (clientProgressPhotosQuery.data || []).filter((p) => p.phase !== "BEFORE" && p.phase !== "AFTER"),
     [clientProgressPhotosQuery.data]
   );
-  const historyEntries = useMemo(() => {
-    const tracking = (clientTrackingLogsQuery.data || []).map((log) => ({
-      key: `tracking:${log.id}`,
-      kind: "tracking" as const,
-      createdAt: log.createdAt,
-      title: "회원 추적",
-      summary: `${log.painNote || "-"} / ${log.goalNote || "-"}`,
-      detail: log
-    }));
-    const homework = (clientHomeworksQuery.data || []).map((h) => ({
-      key: `homework:${h.id}`,
-      kind: "homework" as const,
-      createdAt: h.createdAt,
-      title: "숙제",
-      summary: h.content || "-",
-      detail: h
-    }));
-    return [...tracking, ...homework].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  }, [clientTrackingLogsQuery.data, clientHomeworksQuery.data]);
+  const historyEntries = useMemo(
+    () =>
+      (clientTrackingLogsQuery.data || [])
+        .map((log) => ({
+          key: `tracking:${log.id}`,
+          kind: "tracking" as const,
+          createdAt: log.createdAt,
+          summary: `${log.painNote || "-"} / ${log.goalNote || "-"}`,
+          detail: log
+        }))
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    [clientTrackingLogsQuery.data]
+  );
   const selectedHistoryEntry = useMemo(
     () => historyEntries.find((x) => x.key === selectedHistoryKey) || null,
     [historyEntries, selectedHistoryKey]
@@ -407,6 +526,20 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       .filter(Boolean);
     return Array.from(new Set([...fromLogs, ...fromTemplates]));
   }, [groupSequencesQuery.data, groupSequenceTemplatesQuery.data, groupDraft.equipmentType, groupDraft.equipmentBrand]);
+  const sequenceMoves = useMemo(() => {
+    const q = sequenceMoveSearch.trim().toLowerCase();
+    const merged = [
+      ...PILATES_MOVE_LIBRARY,
+      ...customMoveLibrary.map((name, idx) => ({
+        id: `custom-${idx}-${name}`,
+        name,
+        focus: "커스텀",
+        level: "입문" as const
+      }))
+    ];
+    if (!q) return merged;
+    return merged.filter((m) => m.name.toLowerCase().includes(q) || m.focus.toLowerCase().includes(q));
+  }, [sequenceMoveSearch, customMoveLibrary]);
   const latestReusableSequence = useMemo(() => {
     const rows = (groupSequencesQuery.data || []).filter((g) => {
       if (groupDraft.sessionId && g.sessionId === groupDraft.sessionId) return false;
@@ -426,11 +559,15 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const equipmentSelectValue = isCustomEquipmentInput ? CUSTOM_TEXT : selectedEquipmentMeta ? selectedEquipmentMeta.value : "";
   const shouldShowSpringSetting = selectedEquipmentMeta ? selectedEquipmentMeta.hasSpring : isCustomEquipment ? customEquipmentHasSpring : false;
   const timelineScrollTargetId = flashReportSessionId || flashSequenceSessionId || flashNewSessionActionId || selectedTimelineSessionId;
+  const calendarDateKeys = useMemo(
+    () => Object.keys(calendarSessionsByDate).sort((a, b) => (a < b ? -1 : 1)),
+    [calendarSessionsByDate]
+  );
 
   const createClientMutation = useMutation({
     mutationFn: createClient,
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["clients", selectedCenterId] });
+      qc.invalidateQueries({ queryKey: ["clients"] });
       setSelectedMemberId(data.id);
       setMemberSearch("");
       setShowMemberForm(false);
@@ -447,23 +584,67 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       setNotice("센터가 추가되었습니다.");
     }
   });
+  const updateCenterMutation = useMutation({
+    mutationFn: ({ centerId, name }: { centerId: string; name: string }) => updateCenter(centerId, { name }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["centers"] });
+      setSelectedCenterId(data.id);
+      setEditingCenterId("");
+      setEditingCenterName("");
+      setNotice("센터 이름을 수정했습니다.");
+    }
+  });
+  const deleteCenterMutation = useMutation({
+    mutationFn: (centerId: string) => deleteCenter(centerId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["centers"] });
+      setSelectedCenterId("");
+      setEditingCenterId("");
+      setEditingCenterName("");
+      setNotice("센터를 삭제했습니다.");
+    }
+  });
 
   const createSessionMutation = useMutation({
-    mutationFn: createSession,
-    onSuccess: (data) => {
+    mutationFn: async (payload: {
+      clientIds: string[];
+      date: string;
+      type: "PERSONAL" | "GROUP";
+      memo?: string;
+      startTime?: string;
+      repeatWeeks?: number;
+    }) =>
+      Promise.all(
+        Array.from({ length: (payload.repeatWeeks || 0) + 1 }, (_, weekOffset) => shiftDay(payload.date, weekOffset * 7)).flatMap((date) =>
+          payload.clientIds.map((clientId) =>
+            createSession({
+              clientId,
+              date,
+              type: payload.type,
+              memo: payload.memo,
+              startTime: payload.startTime
+            })
+          )
+        )
+      ),
+    onSuccess: (created) => {
+      if (!created.length) return;
+      const first = created[0];
       qc.invalidateQueries({ queryKey: ["sessions-with-report", sessionDate] });
-      setSelectedSessionId(data.id);
+      qc.invalidateQueries({ queryKey: ["sessions-with-report-range"], exact: false });
+      qc.invalidateQueries({ queryKey: ["sessions-with-report-range-calendar"], exact: false });
+      setSelectedSessionId(first.id);
       setGroupDraft((prev) => ({
         ...prev,
-        sessionId: data.id,
-        lessonType: data.type,
-        classDate: data.date
+        sessionId: first.id,
+        lessonType: first.type,
+        classDate: first.date
       }));
-      setPendingSessionAutoSelectId(data.id);
-      setSelectedMemberId(data.clientId);
+      setPendingSessionAutoSelectId(first.id);
+      setSelectedMemberId(first.clientId);
       setNewSessionCue(true);
-      setFlashNewSessionActionId(data.id);
-      setNotice("세션 생성 완료. 세션 타임라인에서 시퀀스/리포트 기록을 이어서 진행하세요.");
+      setFlashNewSessionActionId(first.id);
+      setNotice(created.length > 1 ? `그룹 세션 ${created.length}건을 생성했습니다.` : "세션 생성 완료. 세션 타임라인에서 시퀀스/리포트 기록을 이어서 진행하세요.");
     }
   });
 
@@ -485,12 +666,12 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     }) =>
       updateClient(clientId, payload),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["clients", selectedCenterId] });
+      qc.invalidateQueries({ queryKey: ["clients"] });
       if (data.centerId && data.centerId !== selectedCenterId) {
         setSelectedCenterId(data.centerId);
       }
       setSelectedMemberId(data.id);
-      setShowMemberEditForm(false);
+      setMemberEditField("");
       setNotice("회원 정보(센터 포함)가 수정되었습니다.");
     }
   });
@@ -508,11 +689,10 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["clients", selectedCenterId] });
+      qc.invalidateQueries({ queryKey: ["clients"] });
       setNotice(`선택 회원 ${selectedClientIds.length}명 일괄 변경 완료.`);
       setSelectionMode(false);
       setSelectedClientIds([]);
-      setLastSelectedClientIndex(null);
       setBulkCenterId("");
       setBulkLessonType("");
     }
@@ -552,14 +732,17 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         summaryItems: payload.summaryItems || undefined,
         strengthNote: payload.strengthNote || undefined,
         improveNote: payload.improveNote || undefined,
-        nextGoal: payload.nextGoal || undefined
+        nextGoal: payload.nextGoal || undefined,
+        homework: payload.homework || undefined,
+        homeworkReminderAt: toIsoFromLocalDateTime(payload.homeworkReminderAt) || undefined,
+        homeworkCompleted: payload.homeworkCompleted
       }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["reports", data.clientId] });
       setSelectedReportId(data.id);
       setSelectedTimelineSessionId(data.sessionId);
       setFlashReportSessionId(data.sessionId);
-      setShowReportEditForm(false);
+      setReportEditField("");
       setNotice("리포트가 수정되었습니다.");
     }
   });
@@ -586,17 +769,10 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     }
   });
   const upsertClientProfileMutation = useMutation({
-    mutationFn: ({ clientId, payload }: { clientId: string; payload: Omit<PersonalMeta, "homeworkGiven" | "homeworkReminderAt"> }) =>
+    mutationFn: ({ clientId, payload }: { clientId: string; payload: PersonalMeta }) =>
       upsertClientProfile(clientId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["client-profile", selectedMemberId] });
-    }
-  });
-  const createHomeworkMutation = useMutation({
-    mutationFn: ({ clientId, content, remindAt }: { clientId: string; content: string; remindAt?: string }) =>
-      createClientHomework(clientId, { content, remindAt }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["client-homeworks", selectedMemberId] });
     }
   });
   const createTrackingLogMutation = useMutation({
@@ -612,8 +788,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         beforeClassMemo?: string;
         afterClassMemo?: string;
         nextLessonPlan?: string;
-        homeworkGiven?: string;
-        homeworkReminderAt?: string;
       };
     }) => createClientTrackingLog(clientId, payload),
     onSuccess: () => {
@@ -761,11 +935,11 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!selectedSessionId) return;
-    const stillVisible = sessionsForSelectedMember.some((s) => s.id === selectedSessionId);
+    const stillVisible = daySessionOptions.some((s) => s.id === selectedSessionId);
     if (stillVisible) return;
     if (showReportedSession) return;
-    setSelectedSessionId(sessionsForSelectedMember[0]?.id || "");
-  }, [selectedSessionId, sessionsForSelectedMember, showReportedSession]);
+    setSelectedSessionId(daySessionOptions[0]?.id || "");
+  }, [selectedSessionId, daySessionOptions, showReportedSession]);
 
   useEffect(() => {
     if (!pendingSessionAutoSelectId) return;
@@ -803,7 +977,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!selectedClient) {
-      setShowMemberEditForm(false);
+      setMemberEditField("");
       setClientEditDraft({ name: "", centerId: "", phone: "", flagsNote: "", note: "", preferredLessonType: "", memberStatus: "CURRENT" });
       return;
     }
@@ -820,17 +994,26 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!selectedReport) {
-      setShowReportEditForm(false);
-      setReportEditDraft(EMPTY_DRAFT);
+      setReportEditField("");
+      setReportEditDraft(createEmptyDraft());
       return;
     }
     setReportEditDraft({
       summaryItems: selectedReport.summaryItems || "",
       strengthNote: selectedReport.strengthNote || "",
       improveNote: selectedReport.improveNote || "",
-      nextGoal: selectedReport.nextGoal || ""
+      nextGoal: selectedReport.nextGoal || "",
+      homework: selectedReport.homework || "",
+      homeworkReminderAt: toLocalDateTimeInput(selectedReport.homeworkReminderAt) || currentLocalDateTimeRounded10(),
+      homeworkCompleted: selectedReport.homeworkCompleted || false
     });
   }, [selectedReport]);
+
+  useEffect(() => {
+    if (!sessionDate) return;
+    setCalendarMonth(sessionDate.slice(0, 7));
+    setCalendarFocusDate(sessionDate);
+  }, [sessionDate]);
 
   useEffect(() => {
     if (!selectedSequenceDetail) {
@@ -860,6 +1043,14 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   }, [selectedCenterId, centerTabs, groupDraft.centerId]);
 
   useEffect(() => {
+    if (!selectedCenterId) {
+      setEditingCenterId("");
+      setEditingCenterName("");
+      return;
+    }
+  }, [selectedCenterId, centers]);
+
+  useEffect(() => {
     const p = clientProfileQuery.data;
     if (!p) {
       setPersonalMetaDraft(PERSONAL_META_EMPTY);
@@ -879,12 +1070,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     setSelectedHistoryKey("");
   }, [selectedMemberId]);
-
-  useEffect(() => {
-    if (!selectedMemberId) return;
-    if (personalMetaDraft.homeworkReminderAt) return;
-    setPersonalMetaDraft((prev) => ({ ...prev, homeworkReminderAt: currentLocalDateTimeRounded10() }));
-  }, [selectedMemberId, personalMetaDraft.homeworkReminderAt]);
 
   useEffect(() => {
     if (!selectedTemplateId) return;
@@ -1015,19 +1200,68 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   const onCreateSession = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedMemberId) {
-      setNotice("먼저 회원을 선택해주세요.");
+    const fd = new FormData(e.currentTarget);
+    const type = String(fd.get("type") || "PERSONAL") as "PERSONAL" | "GROUP";
+    const date = String(fd.get("date") || today);
+    const memo = String(fd.get("memo") || "");
+    const startTime = String(fd.get("startTime") || "") || undefined;
+    const repeatWeeks = Number(fd.get("repeatWeeks") || 0);
+    const requestedIds = type === "GROUP"
+      ? (selectedClientIds.length ? selectedClientIds : selectedMemberId ? [selectedMemberId] : [])
+      : selectedMemberId
+        ? [selectedMemberId]
+        : [];
+    if (!requestedIds.length) {
+      setNotice(type === "GROUP" ? "그룹 세션은 회원을 1명 이상 선택해야 합니다." : "개인 세션은 회원을 선택해야 합니다.");
+      return;
+    }
+    const existing = sessionsQuery.data || [];
+    const candidateDates = Array.from({ length: (type === "GROUP" ? repeatWeeks : 0) + 1 }, (_, weekOffset) => shiftDay(date, weekOffset * 7));
+    const dedupedClientIds = requestedIds.filter((clientId) =>
+      candidateDates.some((candidateDate) => !existing.some((s) => s.clientId === clientId && s.type === type && s.date === candidateDate && (s.startTime || "") === (startTime || "")))
+    );
+    if (!dedupedClientIds.length) {
+      setNotice("같은 날짜/시간/유형의 세션이 이미 있어 생성을 건너뛰었습니다.");
       return;
     }
     setNotice("");
-    const fd = new FormData(e.currentTarget);
     createSessionMutation.mutate({
-      clientId: selectedMemberId,
-      date: String(fd.get("date") || today),
-      type: String(fd.get("type") || "PERSONAL") as "PERSONAL" | "GROUP",
-      memo: String(fd.get("memo") || ""),
-      startTime: String(fd.get("startTime") || "") || undefined
+      clientIds: dedupedClientIds,
+      date,
+      type,
+      memo,
+      startTime,
+      repeatWeeks: type === "GROUP" ? repeatWeeks : 0
     });
+  };
+  const onPickCalendarDate = (date: string, openQuick = false) => {
+    setCalendarFocusDate(date);
+    setSessionDate(date);
+    if (openQuick) {
+      setCalendarQuickTargetDate(date);
+      setCalendarQuickOpen(true);
+    }
+  };
+  const startQuickAction = (action: "session" | "sequence" | "report") => {
+    setSessionDate(calendarQuickTargetDate);
+    if (action === "session") {
+      setActiveLessonForm("session");
+      setCalendarQuickOpen(false);
+      return;
+    }
+    setActiveLessonForm("work");
+    setActiveWorkPane(action === "sequence" ? "sequence" : "report");
+    setCalendarQuickOpen(false);
+    if (action === "report" && !selectedMemberId) {
+      setNotice("리포트는 회원 선택 후 진행하면 더 빠릅니다.");
+    }
+  };
+  const moveCalendar = (amount: number) => {
+    const next =
+      calendarView === "month"
+        ? shiftMonth(calendarFocusDate.slice(0, 7), amount) + "-01"
+        : shiftDay(calendarFocusDate, calendarView === "week" ? amount * 7 : amount);
+    onPickCalendarDate(next);
   };
 
   const onUpdateClient = (e: FormEvent<HTMLFormElement>) => {
@@ -1038,6 +1272,25 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       return;
     }
     setNotice("");
+    updateClientMutation.mutate({
+      clientId: selectedMemberId,
+      payload: {
+        name: clientEditDraft.name.trim(),
+        centerId: clientEditDraft.centerId || selectedCenterId || undefined,
+        phone: clientEditDraft.phone || undefined,
+        flagsNote: clientEditDraft.flagsNote || undefined,
+        note: clientEditDraft.note || undefined,
+        preferredLessonType: clientEditDraft.preferredLessonType || undefined,
+        memberStatus: clientEditDraft.memberStatus
+      }
+    });
+  };
+  const onSaveClientInlineField = () => {
+    if (!selectedMemberId) return;
+    if (!clientEditDraft.name.trim()) {
+      setNotice("회원 이름은 필수입니다.");
+      return;
+    }
     updateClientMutation.mutate({
       clientId: selectedMemberId,
       payload: {
@@ -1064,7 +1317,10 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       summaryItems: draft.summaryItems,
       strengthNote: draft.strengthNote,
       improveNote: draft.improveNote,
-      nextGoal: draft.nextGoal
+      nextGoal: draft.nextGoal,
+      homework: draft.homework,
+      homeworkReminderAt: toIsoFromLocalDateTime(draft.homeworkReminderAt) || undefined,
+      homeworkCompleted: draft.homeworkCompleted
     });
   };
 
@@ -1073,6 +1329,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     setSuppressHasReportWarning(false);
     const session = (sessionsQuery.data || []).find((s) => s.id === sessionId);
     if (session) {
+      setSelectedMemberId(session.clientId);
       setGroupDraft((prev) => ({
         ...prev,
         sessionId: session.id,
@@ -1080,6 +1337,39 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         classDate: session.date
       }));
     }
+  };
+  const onAddMembersToSelectedGroupSession = () => {
+    if (!selectedSession || selectedSession.type !== "GROUP") {
+      setNotice("그룹 세션을 먼저 선택해주세요.");
+      return;
+    }
+    if (!selectedClientIds.length) {
+      setNotice("추가할 회원을 선택하세요. (멀티 선택 모드)");
+      return;
+    }
+    const existing = sessionsQuery.data || [];
+    const startTime = selectedSession.startTime || undefined;
+    const candidateIds = selectedClientIds.filter(
+      (clientId) =>
+        !existing.some(
+          (s) =>
+            s.clientId === clientId &&
+            s.type === "GROUP" &&
+            s.date === selectedSession.date &&
+            (s.startTime || "") === (selectedSession.startTime || "")
+        )
+    );
+    if (!candidateIds.length) {
+      setNotice("선택 회원은 이미 같은 그룹 시간대 세션에 포함되어 있습니다.");
+      return;
+    }
+    createSessionMutation.mutate({
+      clientIds: candidateIds,
+      date: selectedSession.date,
+      type: "GROUP",
+      memo: selectedSession.memo || "",
+      startTime
+    });
   };
 
   const onToggleMember = (memberId: string) => {
@@ -1100,29 +1390,15 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       return;
     }
     const withToggleKey = !!event.ctrlKey || !!event.metaKey;
-    const withRangeKey = !!event.shiftKey;
-
-    if (withRangeKey && lastSelectedClientIndex !== null) {
-      const start = Math.min(lastSelectedClientIndex, index);
-      const end = Math.max(lastSelectedClientIndex, index);
-      const rangeIds = filteredClients.slice(start, end + 1).map((c) => c.id);
-      setSelectionMode(true);
-      setSelectedClientIds((prev) => Array.from(new Set([...prev, ...rangeIds])));
-      setSelectedMemberId(memberId);
-      return;
-    }
-
     if (withToggleKey) {
       setSelectionMode(true);
       toggleSelectionMember(memberId);
-      setLastSelectedClientIndex(index);
       setSelectedMemberId(memberId);
       return;
     }
 
     if (selectionMode) {
       toggleSelectionMember(memberId);
-      setLastSelectedClientIndex(index);
       setSelectedMemberId(memberId);
       return;
     }
@@ -1137,7 +1413,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     longPressTimerRef.current = window.setTimeout(() => {
       setSelectionMode(true);
       toggleSelectionMember(memberId);
-      setLastSelectedClientIndex(index);
       setSelectedMemberId(memberId);
       longPressTriggeredRef.current = true;
     }, 450);
@@ -1152,7 +1427,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
   const endSelectionMode = () => {
     setSelectionMode(false);
     setSelectedClientIds([]);
-    setLastSelectedClientIndex(null);
   };
 
   const applyBulkCenter = () => {
@@ -1201,6 +1475,8 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     }
     const report = reportBySessionId[sessionId];
     const seq = sequenceBySessionId[sessionId];
+    const session = (sessionsQuery.data || []).find((s) => s.id === sessionId);
+    if (session) setSelectedMemberId(session.clientId);
     setSelectedReportId(report?.id || "");
     if (report) {
       setDetailPanelMode("report");
@@ -1220,12 +1496,18 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     }
     setSelectedTimelineSessionId(sessionId);
     setSelectedSessionId(sessionId);
+    const session = (sessionsQuery.data || []).find((s) => s.id === sessionId);
+    if (session) {
+      setSelectedMemberId(session.clientId);
+      setSessionDate(session.date);
+    }
     if (report?.id) {
       setSelectedReportId(report.id);
       setSelectedSequenceDetail(null);
       setDetailPanelMode("report");
       return;
     }
+    setCalendarQuickOpen(false);
     setActiveLessonForm("work");
     setActiveWorkPane("report");
     setNotice("이 세션의 리포트를 작성하세요.");
@@ -1241,13 +1523,19 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     }
     setSelectedTimelineSessionId(sessionId);
     setSelectedSessionId(sessionId);
+    const selectedSessionRow = (sessionsQuery.data || []).find((s) => s.id === sessionId);
+    if (selectedSessionRow) {
+      setSelectedMemberId(selectedSessionRow.clientId);
+      setSessionDate(selectedSessionRow.date);
+    }
     if (sequence) {
       setSelectedSequenceDetail(sequence);
       setSelectedReportId("");
       setDetailPanelMode("sequence");
       return;
     }
-    const session = (sessionsQuery.data || []).find((s) => s.id === sessionId);
+    const session = selectedSessionRow || (sessionsQuery.data || []).find((s) => s.id === sessionId);
+    setCalendarQuickOpen(false);
     setActiveLessonForm("work");
     setActiveWorkPane("sequence");
     if (session) {
@@ -1267,6 +1555,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       setGroupDraft((prev) => ({ ...prev, sessionId: "" }));
       return;
     }
+    setSelectedMemberId(session.clientId);
     setGroupDraft((prev) => ({
       ...prev,
       sessionId: session.id,
@@ -1311,6 +1600,46 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     setSequenceLoadBackup(null);
     setNotice("이전 시퀀스 불러오기를 취소했습니다.");
   };
+  const toggleSequenceMove = (moveId: string) => {
+    setSelectedMoveIds((prev) => (prev.includes(moveId) ? prev.filter((id) => id !== moveId) : [...prev, moveId]));
+  };
+  const addSelectedMovesToSequence = (target: "today" | "next") => {
+    if (!selectedMoveIds.length) {
+      setNotice("추가할 동작을 먼저 선택하세요.");
+      return;
+    }
+    const allMoves = [
+      ...PILATES_MOVE_LIBRARY,
+      ...customMoveLibrary.map((name, idx) => ({
+        id: `custom-${idx}-${name}`,
+        name,
+        focus: "커스텀",
+        level: "입문" as const
+      }))
+    ];
+    const selectedNames = allMoves.filter((m) => selectedMoveIds.includes(m.id)).map((m) => m.name);
+    if (!selectedNames.length) {
+      setNotice("선택한 동작을 찾을 수 없습니다.");
+      return;
+    }
+    setGroupDraft((prev) => {
+      const base = target === "today" ? prev.todaySequence || "" : prev.nextSequence || "";
+      const merged = mergeSequenceLines(base, selectedNames);
+      return target === "today" ? { ...prev, todaySequence: merged } : { ...prev, nextSequence: merged };
+    });
+    setNotice(`${selectedNames.length}개 동작을 ${target === "today" ? "오늘" : "다음"} 시퀀스에 추가했습니다.`);
+  };
+  const onAddCustomMove = () => {
+    const value = customMoveInput.trim();
+    if (!value) return;
+    if (customMoveLibrary.includes(value)) {
+      setNotice("이미 등록된 커스텀 동작입니다.");
+      return;
+    }
+    setCustomMoveLibrary((prev) => [...prev, value]);
+    setCustomMoveInput("");
+    setNotice("커스텀 동작을 라이브러리에 추가했습니다.");
+  };
 
   const onCreateShare = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1328,6 +1657,14 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   const onUpdateReport = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!selectedReportId) return;
+    setNotice("");
+    updateReportMutation.mutate({
+      reportId: selectedReportId,
+      payload: reportEditDraft
+    });
+  };
+  const onSaveReportInlineField = () => {
     if (!selectedReportId) return;
     setNotice("");
     updateReportMutation.mutate({
@@ -1353,14 +1690,29 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
     createCenterMutation.mutate({ name });
   };
 
-  const applyLatestHomework = () => {
-    const latest = (clientHomeworksQuery.data || [])[0];
-    if (!latest?.content) {
-      setNotice("불러올 이전 숙제가 없습니다.");
+  const onPickCenter = (centerId: string, withManageKey: boolean) => {
+    setSelectedCenterId((prev) => (prev === centerId && !withManageKey ? "" : centerId));
+    setShowCenterForm(false);
+    if (withManageKey) {
+      const center = centers.find((c) => c.id === centerId);
+      setEditingCenterId(centerId);
+      setEditingCenterName(center?.name || "");
       return;
     }
-    setPersonalMetaDraft((prev) => ({ ...prev, homeworkGiven: latest.content }));
-    setNotice("이전 숙제를 불러왔습니다.");
+    setEditingCenterId("");
+    setEditingCenterName("");
+  };
+  const onSaveCenterInline = (centerId: string) => {
+    const name = editingCenterName.trim();
+    if (!name) {
+      setNotice("센터 이름을 입력하세요.");
+      return;
+    }
+    updateCenterMutation.mutate({ centerId, name });
+  };
+  const onDeleteCenterInline = (centerId: string) => {
+    if (!window.confirm("이 센터를 삭제할까요? 기존 수업/회원 기록은 보존됩니다.")) return;
+    deleteCenterMutation.mutate(centerId);
   };
 
   const onSavePersonalMeta = async (e: FormEvent<HTMLFormElement>) => {
@@ -1376,9 +1728,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       surgeryHistory: String(fd.get("surgeryHistory") || ""),
       beforeClassMemo: String(fd.get("beforeClassMemo") || ""),
       afterClassMemo: String(fd.get("afterClassMemo") || ""),
-      nextLessonPlan: String(fd.get("nextLessonPlan") || ""),
-      homeworkGiven: String(fd.get("homeworkGiven") || ""),
-      homeworkReminderAt: String(fd.get("homeworkReminderAt") || "")
+      nextLessonPlan: String(fd.get("nextLessonPlan") || "")
     };
     setPersonalMetaDraft(next);
     try {
@@ -1394,15 +1744,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         }
       });
 
-      const remindAtIso = toIsoFromLocalDateTime(next.homeworkReminderAt);
-      if (next.homeworkGiven.trim()) {
-        await createHomeworkMutation.mutateAsync({
-          clientId: selectedMemberId,
-          content: next.homeworkGiven.trim(),
-          remindAt: remindAtIso || undefined
-        });
-      }
-
       await createTrackingLogMutation.mutateAsync({
         clientId: selectedMemberId,
         payload: {
@@ -1411,12 +1752,10 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
           surgeryHistory: next.surgeryHistory || undefined,
           beforeClassMemo: next.beforeClassMemo || undefined,
           afterClassMemo: next.afterClassMemo || undefined,
-          nextLessonPlan: next.nextLessonPlan || undefined,
-          homeworkGiven: next.homeworkGiven.trim() || undefined,
-          homeworkReminderAt: remindAtIso || undefined
+          nextLessonPlan: next.nextLessonPlan || undefined
         }
       });
-      setNotice(next.homeworkGiven.trim() ? "회원 추적 저장 완료 (프로필 + 숙제 + 기록)." : "회원 추적 저장 완료 (프로필 + 기록).");
+      setNotice("회원 추적 저장 완료 (프로필 + 기록).");
     } catch {
       setNotice("회원 추적 저장 중 오류가 발생했습니다. 입력 형식을 확인해주세요.");
     }
@@ -1509,7 +1848,10 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
       summaryItems: `호흡 정렬, 코어 안정, 정렬 확인${selectedSession?.memo ? ` (${selectedSession.memo})` : ""}`,
       strengthNote: "호흡 타이밍과 집중도가 좋았음",
       improveNote: "골반/흉추 분리 움직임에서 보상 패턴 감소 필요",
-      nextGoal: `다음 수업 목표: 가동성 + 안정성 균형 (${hhmm} 초안)`
+      nextGoal: `다음 수업 목표: 가동성 + 안정성 균형 (${hhmm} 초안)`,
+      homework: "호흡+코어 10분 복습",
+      homeworkReminderAt: currentLocalDateTimeRounded10(),
+      homeworkCompleted: false
     });
     setNotice("원클릭 초안을 채웠습니다. 필요한 부분만 수정 후 저장하세요.");
   };
@@ -1656,47 +1998,87 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_right,#eef2f7_0,#f7f9fc_35%,#f2f4f8_100%)] p-4 md:p-8">
-      <header className="mx-auto mb-6 flex w-full max-w-7xl items-center justify-between rounded-2xl border border-white/70 bg-white/70 p-4 shadow-lg backdrop-blur-md animate-rise">
-        <div>
-          <p className="font-['Fraunces'] text-2xl text-slate-900">수업 리포트 관리</p>
-          <p className="text-sm text-slate-600">
-            서비스 상태: {healthQuery.data?.status === "UP" ? "정상" : healthQuery.data?.status ? "점검 필요" : "확인 중"}
-          </p>
-        </div>
-        <button className="btn" onClick={onLogout}>로그아웃</button>
-      </header>
-
       {notice && (
         <section className="mx-auto mb-4 w-full max-w-7xl rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
           {notice}
         </section>
       )}
 
-      <section className="mx-auto mb-4 grid w-full max-w-7xl gap-4 md:grid-cols-[1fr_auto]">
-        <Card title="센터 / 탭">
+      <section className="mx-auto mb-4 grid w-full max-w-7xl gap-3 md:grid-cols-[1fr_auto]">
+        <Card>
           <div className="space-y-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold text-slate-900">센터 / 탭</h2>
+                <span className="text-[11px] text-slate-500">센터명은 `Ctrl(Cmd)+센터 클릭` 후 칩 안에서 바로 수정/삭제</span>
+              </div>
+              <button className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={onLogout}>로그아웃</button>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedCenterId("")}
+                onClick={() => {
+                  setSelectedCenterId("");
+                  setEditingCenterId("");
+                  setEditingCenterName("");
+                }}
                 className={`rounded-lg border px-3 py-1.5 text-sm ${!selectedCenterId ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
               >
                 전체
               </button>
-              {centerTabs.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setSelectedCenterId((prev) => (prev === c.id ? "" : c.id))}
-                  className={`rounded-lg border px-3 py-1.5 text-sm ${selectedCenterId === c.id ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
-                >
-                  {c.name}
-                </button>
-              ))}
+              {centerTabs.map((c) =>
+                editingCenterId === c.id ? (
+                  <form
+                    key={c.id}
+                    className="flex items-center gap-1 rounded-lg border border-slate-400 bg-slate-100 px-2 py-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      onSaveCenterInline(c.id);
+                    }}
+                  >
+                    <input
+                      className="w-28 border-0 bg-transparent text-sm text-slate-900 outline-none"
+                      value={editingCenterName}
+                      onChange={(e) => setEditingCenterName(e.target.value)}
+                      autoFocus
+                    />
+                    <button type="submit" className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] text-slate-700">
+                      저장
+                    </button>
+                    <button type="button" className="rounded border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-700" onClick={() => onDeleteCenterInline(c.id)}>
+                      삭제
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] text-slate-600"
+                      onClick={() => {
+                        setEditingCenterId("");
+                        setEditingCenterName("");
+                      }}
+                    >
+                      취소
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={(e) => onPickCenter(c.id, e.ctrlKey || e.metaKey)}
+                    className={`rounded-lg border px-3 py-1.5 text-sm ${selectedCenterId === c.id ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
+                    title="Ctrl/Cmd + 클릭: 센터명 바로 수정"
+                  >
+                    {c.name}
+                  </button>
+                )
+              )}
               <button
                 type="button"
                 className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700"
-                onClick={() => setShowCenterForm((v) => !v)}
+                onClick={() => {
+                  setEditingCenterId("");
+                  setEditingCenterName("");
+                  setShowCenterForm((v) => !v);
+                }}
               >
                 {showCenterForm ? "취소" : "센터 추가"}
               </button>
@@ -1710,21 +2092,24 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
           </div>
         </Card>
 
-        <div className="flex items-center gap-2 self-end">
-          <button
-            type="button"
-            className={`rounded-lg border px-3 py-2 text-sm ${activeTab === "lesson" ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
-            onClick={() => setActiveTab("lesson")}
-          >
-            수업 관리(공통)
-          </button>
-          <button
-            type="button"
-            className={`rounded-lg border px-3 py-2 text-sm ${activeTab === "member" ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-600"}`}
-            onClick={() => setActiveTab("member")}
-          >
-            회원 추적(개인 특화)
-          </button>
+        <div className="flex items-center gap-2 self-end text-xs">
+          <span className="text-slate-500">화면</span>
+          <div className="inline-flex overflow-hidden rounded-lg border border-slate-300 bg-white/80 shadow-sm">
+            <button
+              type="button"
+              className={`px-3 py-1.5 ${activeTab === "lesson" ? "bg-slate-900 text-white" : "text-slate-700"}`}
+              onClick={() => setActiveTab("lesson")}
+            >
+              수업
+            </button>
+            <button
+              type="button"
+              className={`border-l border-slate-300 px-3 py-1.5 ${activeTab === "member" ? "bg-slate-900 text-white" : "text-slate-700"}`}
+              onClick={() => setActiveTab("member")}
+            >
+              회원 추적
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1838,163 +2223,80 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
             )}
             getKey={(c) => c.id}
           />
-          <p className="mt-2 text-[11px] text-slate-500">
-            PC: Ctrl/Cmd 클릭 추가, Shift 범위 선택 | 모바일: 길게 눌러 선택 모드
-          </p>
+          <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-slate-500">
+            <HelpChip label="⌘/Ctrl+Click" help="PC에서 Ctrl 또는 Cmd를 누른 채 회원을 클릭하면 다중 선택됩니다." />
+            <HelpChip label="Mobile Long Press" help="모바일에서 길게 누르면 다중 선택 모드가 시작됩니다." />
+          </div>
 
           {selectedClient && (
             <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100 p-3 text-xs">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="font-semibold text-slate-900">선택 회원 정보</p>
+              <p className="mb-2 font-semibold text-slate-900">선택 회원 정보</p>
+              <EditableDetailRow label="이름" value={selectedClient.name} active={memberEditField === "name"} onToggle={() => setMemberEditField((prev) => (prev === "name" ? "" : "name"))}>
+                <input className="field" value={clientEditDraft.name} onChange={(e) => setClientEditDraft((p) => ({ ...p, name: e.target.value }))} />
+              </EditableDetailRow>
+              <EditableDetailRow label="센터" value={selectedClientCenterName} active={memberEditField === "centerId"} onToggle={() => setMemberEditField((prev) => (prev === "centerId" ? "" : "centerId"))}>
+                <select className="field" value={clientEditDraft.centerId} onChange={(e) => setClientEditDraft((p) => ({ ...p, centerId: e.target.value }))}>
+                  <option value="">센터 선택</option>
+                  {centers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </EditableDetailRow>
+              <EditableDetailRow label="전화" value={selectedClient.phone || "-"} active={memberEditField === "phone"} onToggle={() => setMemberEditField((prev) => (prev === "phone" ? "" : "phone"))}>
+                <input className="field" value={clientEditDraft.phone} onChange={(e) => setClientEditDraft((p) => ({ ...p, phone: e.target.value }))} />
+              </EditableDetailRow>
+              <EditableDetailRow label="기본 수업형태" value={selectedClient.preferredLessonType === "PERSONAL" ? "개인" : selectedClient.preferredLessonType === "GROUP" ? "그룹" : "-"} active={memberEditField === "preferredLessonType"} onToggle={() => setMemberEditField((prev) => (prev === "preferredLessonType" ? "" : "preferredLessonType"))}>
+                <select
+                  className="field"
+                  value={clientEditDraft.preferredLessonType}
+                  onChange={(e) => setClientEditDraft((p) => ({ ...p, preferredLessonType: e.target.value as "" | "PERSONAL" | "GROUP" }))}
+                >
+                  <option value="">선택 안함</option>
+                  <option value="PERSONAL">개인</option>
+                  <option value="GROUP">그룹</option>
+                </select>
+              </EditableDetailRow>
+              <EditableDetailRow label="회원 상태" value={selectedClient.memberStatus === "PAUSED" ? "잠시 휴식" : selectedClient.memberStatus === "FORMER" ? "과거 회원" : "현재 회원"} active={memberEditField === "memberStatus"} onToggle={() => setMemberEditField((prev) => (prev === "memberStatus" ? "" : "memberStatus"))}>
+                <select
+                  className="field"
+                  value={clientEditDraft.memberStatus}
+                  onChange={(e) => setClientEditDraft((p) => ({ ...p, memberStatus: e.target.value as "CURRENT" | "PAUSED" | "FORMER" }))}
+                >
+                  <option value="CURRENT">현재 회원</option>
+                  <option value="PAUSED">잠시 휴식</option>
+                  <option value="FORMER">과거 회원</option>
+                </select>
+              </EditableDetailRow>
+              <EditableDetailRow label="주의사항" value={selectedClient.flagsNote || "-"} active={memberEditField === "flagsNote"} onToggle={() => setMemberEditField((prev) => (prev === "flagsNote" ? "" : "flagsNote"))}>
+                <input className="field" value={clientEditDraft.flagsNote} onChange={(e) => setClientEditDraft((p) => ({ ...p, flagsNote: e.target.value }))} />
+              </EditableDetailRow>
+              <EditableDetailRow label="메모" value={selectedClient.note || "-"} active={memberEditField === "note"} onToggle={() => setMemberEditField((prev) => (prev === "note" ? "" : "note"))}>
+                <textarea className="field min-h-16" value={clientEditDraft.note} onChange={(e) => setClientEditDraft((p) => ({ ...p, note: e.target.value }))} />
+              </EditableDetailRow>
+              <DetailRow label="리포트 수" value={String(reports.length)} />
+              {!!memberEditField && (
                 <button
                   type="button"
-                  className="rounded-md border border-slate-300 px-2 py-1 text-[11px] text-slate-700"
-                  onClick={() => setShowMemberEditForm((v) => !v)}
+                  className="btn mt-2 w-full"
+                  disabled={updateClientMutation.isPending}
+                  onClick={onSaveClientInlineField}
                 >
-                  {showMemberEditForm ? "수정 취소" : "회원 정보 수정"}
+                  {updateClientMutation.isPending ? "저장중..." : "회원 정보 저장"}
                 </button>
-              </div>
-              <DetailRow label="이름" value={selectedClient.name} />
-              <DetailRow label="센터" value={selectedClientCenterName} />
-              <DetailRow label="전화" value={selectedClient.phone || "-"} />
-              <DetailRow label="기본 수업형태" value={selectedClient.preferredLessonType === "PERSONAL" ? "개인" : selectedClient.preferredLessonType === "GROUP" ? "그룹" : "-"} />
-              <DetailRow label="회원 상태" value={selectedClient.memberStatus === "PAUSED" ? "잠시 휴식" : selectedClient.memberStatus === "FORMER" ? "과거 회원" : "현재 회원"} />
-              <DetailRow label="주의사항" value={selectedClient.flagsNote || "-"} />
-              <DetailRow label="메모" value={selectedClient.note || "-"} />
-              <DetailRow label="리포트 수" value={String(reports.length)} />
-              {showMemberEditForm && (
-                <form className="mt-3 space-y-2 rounded-md border border-slate-300 bg-white/80 p-2" onSubmit={onUpdateClient}>
-                  <p className="text-[11px] font-semibold text-slate-500">회원 정보 수정</p>
-                  <p className="text-[11px] text-slate-500">이름</p>
-                  <input
-                    className="field"
-                    value={clientEditDraft.name}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="이름"
-                    required
-                  />
-                  <p className="text-[11px] text-slate-500">센터 이동</p>
-                  <select
-                    className="field"
-                    value={clientEditDraft.centerId}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, centerId: e.target.value }))}
-                  >
-                    <option value="">센터 선택</option>
-                    {centers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-slate-500">전화</p>
-                  <input
-                    className="field"
-                    value={clientEditDraft.phone}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, phone: e.target.value }))}
-                    placeholder="전화"
-                  />
-                  <p className="text-[11px] text-slate-500">주의사항</p>
-                  <input
-                    className="field"
-                    value={clientEditDraft.flagsNote}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, flagsNote: e.target.value }))}
-                    placeholder="주의사항"
-                  />
-                  <p className="text-[11px] text-slate-500">메모</p>
-                  <textarea
-                    className="field min-h-16"
-                    value={clientEditDraft.note}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, note: e.target.value }))}
-                    placeholder="메모"
-                  />
-                  <p className="text-[11px] text-slate-500">기본 수업형태</p>
-                  <select
-                    className="field"
-                    value={clientEditDraft.preferredLessonType}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, preferredLessonType: e.target.value as "" | "PERSONAL" | "GROUP" }))}
-                  >
-                    <option value="">선택 안함</option>
-                    <option value="PERSONAL">개인</option>
-                    <option value="GROUP">그룹</option>
-                  </select>
-                  <p className="text-[11px] text-slate-500">회원 상태</p>
-                  <select
-                    className="field"
-                    value={clientEditDraft.memberStatus}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, memberStatus: e.target.value as "CURRENT" | "PAUSED" | "FORMER" }))}
-                  >
-                    <option value="CURRENT">현재 회원</option>
-                    <option value="PAUSED">잠시 휴식</option>
-                    <option value="FORMER">과거 회원</option>
-                  </select>
-                  <button className="btn w-full" disabled={updateClientMutation.isPending}>
-                    {updateClientMutation.isPending ? "수정중..." : "회원 정보 저장"}
-                  </button>
-                </form>
               )}
             </div>
           )}
         </Card>
 
-        <div className="space-y-4">
-          <Card>
-            <div className="flex gap-2 text-sm">
-              <button type="button" className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "ALL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setLessonTypeFilter("ALL")}>전체</button>
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "PERSONAL" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`}
-                onClick={() => setLessonTypeFilter((prev) => (prev === "PERSONAL" ? "ALL" : "PERSONAL"))}
-              >
-                개인
-              </button>
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-1 ${lessonTypeFilter === "GROUP" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`}
-                onClick={() => setLessonTypeFilter((prev) => (prev === "GROUP" ? "ALL" : "GROUP"))}
-              >
-                그룹
-              </button>
-            </div>
-          </Card>
-
-          <Card>
-            <div className="mb-2 text-sm text-slate-600">
-              선택 회원: <b>{selectedClient?.name || "없음"}</b>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-2 text-sm ${activeLessonForm === "session" ? "border-slate-400 bg-slate-100 text-slate-900" : "border-slate-300 text-slate-700"}`}
-                disabled={!selectedMemberId}
-                onClick={() => setActiveLessonForm((prev) => (prev === "session" ? null : "session"))}
-              >
-                세션 등록
-              </button>
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-2 text-sm ${activeLessonForm === "work" && activeWorkPane === "sequence" ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-300 text-slate-700"}`}
-                onClick={() => {
-                  setActiveLessonForm((prev) => (prev === "work" && activeWorkPane === "sequence" ? null : "work"));
-                  setActiveWorkPane("sequence");
-                }}
-              >
-                시퀀스 기록
-              </button>
-              <button
-                type="button"
-                className={`rounded-md border px-3 py-2 text-sm ${activeLessonForm === "work" && activeWorkPane === "report" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 text-slate-700"}`}
-                disabled={!selectedMemberId}
-                onClick={() => {
-                  setActiveLessonForm((prev) => (prev === "work" && activeWorkPane === "report" ? null : "work"));
-                  setActiveWorkPane("report");
-                }}
-              >
-                리포트 등록
-              </button>
-            </div>
-
+        <div className="space-y-3">
             {activeLessonForm === "session" && (
-              <form className="mt-3 grid gap-2 border-t border-slate-200 pt-3 md:grid-cols-4" onSubmit={onCreateSession}>
+              <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 md:items-center md:p-4">
+              <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-white/40 bg-white p-4 shadow-2xl md:max-w-4xl md:rounded-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-900">세션 생성</p>
+                <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => setActiveLessonForm(null)}>닫기</button>
+              </div>
+              <form className="grid gap-2 md:grid-cols-4" onSubmit={onCreateSession}>
                 <div>
                   <p className="mb-1 text-[11px] text-slate-500">수업 날짜</p>
                   <input
@@ -2038,14 +2340,32 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   <p className="mb-1 text-[11px] text-slate-500">수업 메모</p>
                   <input name="memo" className="field" placeholder="수업 메모" />
                 </div>
-                <button className="btn md:col-span-4" disabled={createSessionMutation.isPending || !selectedMemberId}>
+                <div>
+                  <p className="mb-1 text-[11px] text-slate-500">그룹 반복</p>
+                  <select className="field" name="repeatWeeks" value={sessionRepeatWeeks} onChange={(e) => setSessionRepeatWeeks(Number(e.target.value) as 0 | 4 | 8)}>
+                    <option value={0}>반복 없음</option>
+                    <option value={4}>앞으로 1달</option>
+                    <option value={8}>앞으로 2달</option>
+                  </select>
+                </div>
+                <p className="md:col-span-4 text-[11px] text-slate-500">
+                  그룹 선택 시: 멀티선택 회원({selectedClientIds.length}명)에 같은 시간 세션이 일괄 생성됩니다. 멀티선택이 없으면 현재 선택 회원으로 생성됩니다.
+                </p>
+                <button className="btn md:col-span-4" disabled={createSessionMutation.isPending}>
                   {createSessionMutation.isPending ? "생성중..." : "세션 생성"}
                 </button>
               </form>
+              </div>
+              </div>
             )}
-
             {activeLessonForm === "work" && (
-              <div className="mt-3 border-t border-slate-200 pt-3">
+              <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 md:items-center md:p-4">
+              <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-white/40 bg-white p-4 shadow-2xl md:max-w-5xl md:rounded-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-900">{activeWorkPane === "sequence" ? "시퀀스 기록" : "리포트 작성"}</p>
+                <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => setActiveLessonForm(null)}>닫기</button>
+              </div>
+              <div className="">
               {activeWorkPane === "sequence" && (
               <section className="space-y-2 rounded-lg border border-cyan-200 bg-cyan-50/40 p-2">
                 <p className="text-xs font-semibold text-cyan-800">시퀀스 기록</p>
@@ -2055,10 +2375,9 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   <select className="field" value={groupDraft.sessionId || ""} onChange={(e) => onChangeSequenceSession(e.target.value)}>
                     <option value="">세션 선택 안함</option>
                     {(sessionsQuery.data || [])
-                      .filter((s) => !selectedMemberId || s.clientId === selectedMemberId)
                       .map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.date} / {s.startTime || "시간 미입력"} / {s.type === "PERSONAL" ? "개인" : "그룹"} / {toShort(s.memo || "메모 없음", 18)}
+                        {s.date} / {s.startTime || "시간 미입력"} / {s.type === "PERSONAL" ? "개인" : "그룹"} / {clientById[s.clientId]?.name || "회원"} / {toShort(s.memo || "메모 없음", 18)}
                       </option>
                     ))}
                   </select>
@@ -2197,6 +2516,49 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   <p className="mb-1 text-[11px] text-slate-500">다음 시퀀스 계획</p>
                   <textarea name="nextSequence" className="field min-h-16" value={groupDraft.nextSequence} onChange={(e) => setGroupDraft((p) => ({ ...p, nextSequence: e.target.value }))} />
                 </div>
+                <div className="md:col-span-2 rounded-md border border-cyan-200 bg-white/80 p-2">
+                  <p className="mb-1 text-[11px] font-semibold text-cyan-800">필라테스 동작 라이브러리 (샘플 + 커스텀)</p>
+                  <div className="mb-2 grid grid-cols-[1fr_auto] gap-2">
+                    <input
+                      className="field"
+                      value={sequenceMoveSearch}
+                      onChange={(e) => setSequenceMoveSearch(e.target.value)}
+                      placeholder="동작 검색 (예: roll, teaser, stretch)"
+                    />
+                    <button type="button" className="rounded-md border border-slate-300 px-2 text-xs text-slate-700" onClick={() => setSelectedMoveIds([])}>
+                      선택 해제
+                    </button>
+                  </div>
+                  <div className="mb-2 grid max-h-40 grid-cols-1 gap-1 overflow-y-auto rounded border border-slate-200 bg-white p-2 text-xs md:grid-cols-2">
+                    {sequenceMoves.map((move) => (
+                      <label key={move.id} className="flex items-center gap-2 rounded border border-slate-100 px-2 py-1">
+                        <input type="checkbox" checked={selectedMoveIds.includes(move.id)} onChange={() => toggleSequenceMove(move.id)} />
+                        <span className="truncate">{move.name}</span>
+                        <span className="ml-auto text-[10px] text-slate-500">{move.focus} / {move.level}</span>
+                      </label>
+                    ))}
+                    {!sequenceMoves.length && <p className="text-slate-500">검색 결과가 없습니다.</p>}
+                  </div>
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    <button type="button" className="rounded-md border border-cyan-300 bg-cyan-50 px-2 py-1 text-xs text-cyan-700" onClick={() => addSelectedMovesToSequence("today")}>
+                      오늘 시퀀스에 추가
+                    </button>
+                    <button type="button" className="rounded-md border border-cyan-300 bg-cyan-50 px-2 py-1 text-xs text-cyan-700" onClick={() => addSelectedMovesToSequence("next")}>
+                      다음 시퀀스에 추가
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <input
+                      className="field"
+                      value={customMoveInput}
+                      onChange={(e) => setCustomMoveInput(e.target.value)}
+                      placeholder="커스텀 동작 추가 (예: 사이드 밴드 변형)"
+                    />
+                    <button type="button" className="rounded-md border border-slate-300 px-2 text-xs text-slate-700" onClick={onAddCustomMove}>
+                      커스텀 추가
+                    </button>
+                  </div>
+                </div>
                 <div className="md:col-span-2 flex items-center gap-2">
                   <button
                     type="button"
@@ -2261,9 +2623,9 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               <form className="space-y-2" onSubmit={onCreateReport}>
                 <select className="field" value={selectedSessionId} onChange={(e) => onChangeSession(e.target.value)} required>
                   <option value="">세션 선택</option>
-                  {sessionsForSelectedMember.map((s) => (
+                  {daySessionOptions.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.date} / {s.type === "PERSONAL" ? "개인" : "그룹"} / {s.startTime || "시간 미입력"} / {toShort(s.memo || "없음", 18)} {s.hasReport ? "(리포트 있음)" : ""}
+                      {s.date} / {s.type === "PERSONAL" ? "개인" : "그룹"} / {s.startTime || "시간 미입력"} / {clientById[s.clientId]?.name || "회원"} / {toShort(s.memo || "없음", 18)} {s.hasReport ? "(리포트 있음)" : ""}
                     </option>
                   ))}
                 </select>
@@ -2300,6 +2662,49 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   onVoice={() => startVoiceInput("nextGoal")}
                   recording={activeVoiceField === "nextGoal"}
                 />
+                <FieldWithVoice
+                  label="숙제"
+                  value={draft.homework}
+                  placeholder="숙제"
+                  onChange={(v) => setDraft((p) => ({ ...p, homework: v }))}
+                  onVoice={() => startVoiceInput("homework")}
+                  recording={activeVoiceField === "homework"}
+                />
+                {previousHomeworkOptions.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-[11px] text-slate-500">이전 숙제 선택</p>
+                    <select
+                      className="field"
+                      value=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        setDraft((p) => ({ ...p, homework: e.target.value }));
+                      }}
+                    >
+                      <option value="">이전 숙제 불러오기</option>
+                      {previousHomeworkOptions.map((item) => (
+                        <option key={`homework-draft-${item}`} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <p className="mb-1 text-[11px] text-slate-500">숙제 알림 시각 (선택)</p>
+                  <DateTimeFieldPicker
+                    value={draft.homeworkReminderAt}
+                    onChange={(next) => setDraft((p) => ({ ...p, homeworkReminderAt: next }))}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={draft.homeworkCompleted}
+                    onChange={(e) => setDraft((p) => ({ ...p, homeworkCompleted: e.target.checked }))}
+                  />
+                  숙제 수행 완료 표시
+                </label>
 
                 <button className="btn w-full" disabled={createReportMutation.isPending || !selectedSessionId || !!selectedSession?.hasReport}>
                   {createReportMutation.isPending ? "저장중..." : "리포트 저장"}
@@ -2321,19 +2726,104 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
               </section>
               )}
               </div>
+              </div>
+              </div>
             )}
-          </Card>
 
           <section className="grid gap-4 md:grid-cols-2">
             <Card title="세션 타임라인 (리포트+시퀀스)">
-              <div className="mb-2 flex items-center gap-2 text-xs">
-                <span className="text-slate-500">조회 날짜</span>
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-500">캘린더 시작</span>
+                <div className="flex items-center gap-1">
+                  <button type="button" className={`rounded border px-2 py-1 ${lessonTypeFilter === "ALL" ? "border-slate-400 bg-slate-100" : "border-slate-300 bg-white"}`} onClick={() => setLessonTypeFilter("ALL")}>전체</button>
+                  <button type="button" className={`rounded border px-2 py-1 ${lessonTypeFilter === "PERSONAL" ? "border-slate-400 bg-slate-100" : "border-slate-300 bg-white"}`} onClick={() => setLessonTypeFilter("PERSONAL")}>개인</button>
+                  <button type="button" className={`rounded border px-2 py-1 ${lessonTypeFilter === "GROUP" ? "border-slate-400 bg-slate-100" : "border-slate-300 bg-white"}`} onClick={() => setLessonTypeFilter("GROUP")}>그룹</button>
+                </div>
                 <input
                   type="date"
                   className="field max-w-44 !py-1"
-                  value={sessionDate}
-                  onChange={(e) => setSessionDate(e.target.value)}
+                  value={calendarFocusDate}
+                  onChange={(e) => onPickCalendarDate(e.target.value)}
                 />
+                <div className="inline-flex overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
+                  <button type="button" className="px-2 py-1 text-xs text-slate-700" onClick={() => moveCalendar(-1)}>
+                    이전 {calendarView === "month" ? "월" : calendarView === "week" ? "주" : "일"}
+                  </button>
+                  <button type="button" className="border-l border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => moveCalendar(1)}>
+                    다음 {calendarView === "month" ? "월" : calendarView === "week" ? "주" : "일"}
+                  </button>
+                </div>
+                <div className="ml-auto flex items-center gap-1">
+                  <button type="button" className={`rounded border px-2 py-1 ${calendarView === "month" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setCalendarView("month")}>월</button>
+                  <button type="button" className={`rounded border px-2 py-1 ${calendarView === "week" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setCalendarView("week")}>주</button>
+                  <button type="button" className={`rounded border px-2 py-1 ${calendarView === "day" ? "border-slate-400 bg-slate-100" : "border-slate-300"}`} onClick={() => setCalendarView("day")}>일</button>
+                </div>
+              </div>
+              <div className="mb-2 rounded-lg border border-slate-200 bg-white/80 p-2">
+                {calendarView === "month" && (
+                  <MonthCalendar
+                    month={calendarFocusDate.slice(0, 7)}
+                    dayStatus={monthDayOverview}
+                    selectedDate={calendarFocusDate}
+                    onPickDate={onPickCalendarDate}
+                  />
+                )}
+                {calendarView === "week" && (
+                  <WeekCalendar
+                    startDate={calendarFocusDate}
+                    dayStatus={calendarDayOverview}
+                    selectedDate={calendarFocusDate}
+                    onPickDate={onPickCalendarDate}
+                  />
+                )}
+                {calendarView === "day" && (
+                  <div className="space-y-1">
+                    {calendarDateKeys.map((date) => (
+                      <button
+                        key={date}
+                        type="button"
+                        className={`flex w-full items-center justify-between rounded border px-2 py-1 text-left ${calendarFocusDate === date ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white"}`}
+                        onClick={(e) => onPickCalendarDate(date, e.ctrlKey || e.metaKey)}
+                      >
+                        <span className="text-xs font-medium text-slate-800">{date}</span>
+                        <span className="text-[11px] text-slate-600">
+                          세션 {calendarDayOverview[date]?.total || 0}
+                        </span>
+                      </button>
+                    ))}
+                    {!calendarDateKeys.length && <p className="text-xs text-slate-500">선택 범위에 세션이 없습니다.</p>}
+                  </div>
+                )}
+                {calendarQuickOpen && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
+                    <span className="text-slate-600">{calendarQuickTargetDate}</span>
+                    <button type="button" className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-700" onClick={() => startQuickAction("session")}>
+                      + 세션
+                    </button>
+                    <button type="button" className="rounded border border-cyan-300 bg-cyan-50 px-2 py-1 text-cyan-700" onClick={() => startQuickAction("sequence")}>
+                      ◉ 시퀀스
+                    </button>
+                    <button type="button" className="rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-emerald-700" onClick={() => startQuickAction("report")}>
+                      ✎ 리포트
+                    </button>
+                    <button type="button" className="ml-auto rounded border border-slate-300 bg-white px-2 py-1 text-slate-600" onClick={() => setCalendarQuickOpen(false)}>
+                      닫기
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="mb-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs text-indigo-700 disabled:opacity-50"
+                  disabled={createSessionMutation.isPending || selectedSession?.type !== "GROUP" || !selectedClientIds.length}
+                  onClick={onAddMembersToSelectedGroupSession}
+                >
+                  선택 회원을 현재 그룹 세션 시간에 추가
+                </button>
+                <span className="text-[11px] text-slate-500">
+                  세션 선택 + 멀티선택 회원 {selectedClientIds.length}명
+                </span>
               </div>
               <VirtualList
                 items={timelineSessions}
@@ -2349,15 +2839,27 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   const actionGuide = flashNewSessionActionId === s.id;
                   const reportSelected = active && detailPanelMode === "report" && !!report && selectedReportId === report.id;
                   const sequenceSelected = active && detailPanelMode === "sequence" && !!seq && selectedSequenceDetail?.id === (seq as GroupSequenceLog).id;
+                  const homeworkLabel = !report?.homework
+                    ? "숙제 없음"
+                    : report.homeworkCompleted
+                      ? "숙제 완료"
+                      : "숙제 미완료";
+                  const homeworkClass = !report?.homework
+                    ? "border-slate-300 bg-slate-100 text-slate-600"
+                    : report.homeworkCompleted
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      : "border-amber-300 bg-amber-50 text-amber-700";
                   return (
                     <button
                       type="button"
                       onClick={() => onSelectTimelineSession(s.id)}
-                      className={`w-full rounded-lg border p-2 text-left transition-all ${active ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"} ${reportFlashing || sequenceFlashing ? "ring-2 ring-emerald-200" : ""}`}
+                      className={`relative w-full rounded-lg border p-2 text-left transition-all ${active ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white/80"} ${reportFlashing || sequenceFlashing ? "ring-2 ring-emerald-200" : ""}`}
                     >
+                      <span className={`absolute right-2 top-2 rounded border px-1.5 py-0.5 text-[10px] ${homeworkClass}`}>{homeworkLabel}</span>
                       <p className="text-sm font-medium text-slate-900">
                         {s.date} {s.startTime || "시간 미입력"} / {s.type === "PERSONAL" ? "개인" : "그룹"}
                       </p>
+                      <p className="text-xs text-slate-600">회원: {clientById[s.clientId]?.name || "미확인"}</p>
                       <p className="text-xs text-slate-500">{toShort(s.memo || "메모 없음", 22)}</p>
                       <div className="mt-1 grid grid-cols-2 gap-2 text-[11px]">
                         <div className={`rounded ${actionGuide && !seq ? "blink-guide-wrap p-0.5" : ""}`}>
@@ -2390,8 +2892,8 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 }}
                 getKey={(s) => s.id}
               />
-              {!selectedMemberId && <p className="mt-2 text-xs text-slate-500">회원을 선택하면 세션 타임라인이 표시됩니다.</p>}
-              {!!selectedMemberId && !timelineSessions.length && <p className="mt-2 text-xs text-slate-500">해당 회원의 세션이 없습니다.</p>}
+              <p className="mt-2 text-xs text-slate-500">해당 날짜의 전체 세션이 시간순으로 표시됩니다. 세션 클릭 시 해당 회원이 자동 선택됩니다.</p>
+              {!timelineSessions.length && <p className="mt-1 text-xs text-slate-500">이 날짜에 등록된 세션이 없습니다.</p>}
             </Card>
 
             <Card title="기록 상세">
@@ -2473,53 +2975,60 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 <div className="space-y-2 text-xs">
                   <DetailRow label="수업" value={formatSessionSummary(selectedReport)} />
                   <DetailRow label="작성일" value={formatDateTime(selectedReport.createdAt)} />
-                  <DetailRow label="요약" value={selectedReport.summaryItems || "-"} />
-                  <DetailRow label="잘된 점" value={selectedReport.strengthNote || "-"} />
-                  <DetailRow label="보완점" value={selectedReport.improveNote || "-"} />
-                  <DetailRow label="다음 목표" value={selectedReport.nextGoal || "-"} />
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700"
-                    onClick={() => setShowReportEditForm((v) => !v)}
-                  >
-                    {showReportEditForm ? "수정 취소" : "리포트 수정"}
-                  </button>
-
-                  {showReportEditForm && (
-                    <form className="space-y-2 rounded-md border border-slate-300 bg-white/80 p-2" onSubmit={onUpdateReport}>
-                      <p className="text-[11px] font-semibold text-slate-500">리포트 수정</p>
-                      <p className="text-[11px] text-slate-500">요약</p>
+                  <EditableDetailRow label="요약" value={selectedReport.summaryItems || "-"} active={reportEditField === "summaryItems"} onToggle={() => setReportEditField((prev) => (prev === "summaryItems" ? "" : "summaryItems"))}>
+                    <input className="field" value={reportEditDraft.summaryItems} onChange={(e) => setReportEditDraft((p) => ({ ...p, summaryItems: e.target.value }))} />
+                  </EditableDetailRow>
+                  <EditableDetailRow label="잘된 점" value={selectedReport.strengthNote || "-"} active={reportEditField === "strengthNote"} onToggle={() => setReportEditField((prev) => (prev === "strengthNote" ? "" : "strengthNote"))}>
+                    <input className="field" value={reportEditDraft.strengthNote} onChange={(e) => setReportEditDraft((p) => ({ ...p, strengthNote: e.target.value }))} />
+                  </EditableDetailRow>
+                  <EditableDetailRow label="보완점" value={selectedReport.improveNote || "-"} active={reportEditField === "improveNote"} onToggle={() => setReportEditField((prev) => (prev === "improveNote" ? "" : "improveNote"))}>
+                    <input className="field" value={reportEditDraft.improveNote} onChange={(e) => setReportEditDraft((p) => ({ ...p, improveNote: e.target.value }))} />
+                  </EditableDetailRow>
+                  <EditableDetailRow label="다음 목표" value={selectedReport.nextGoal || "-"} active={reportEditField === "nextGoal"} onToggle={() => setReportEditField((prev) => (prev === "nextGoal" ? "" : "nextGoal"))}>
+                    <input className="field" value={reportEditDraft.nextGoal} onChange={(e) => setReportEditDraft((p) => ({ ...p, nextGoal: e.target.value }))} />
+                  </EditableDetailRow>
+                  <EditableDetailRow label="숙제" value={selectedReport.homework || "-"} active={reportEditField === "homework"} onToggle={() => setReportEditField((prev) => (prev === "homework" ? "" : "homework"))}>
+                    <div className="space-y-2">
+                      <input className="field" value={reportEditDraft.homework} onChange={(e) => setReportEditDraft((p) => ({ ...p, homework: e.target.value }))} />
+                      {previousHomeworkOptions.length > 0 && (
+                        <select
+                          className="field"
+                          value=""
+                          onChange={(e) => {
+                            if (!e.target.value) return;
+                            setReportEditDraft((p) => ({ ...p, homework: e.target.value }));
+                          }}
+                        >
+                          <option value="">이전 숙제 불러오기</option>
+                          {previousHomeworkOptions.map((item) => (
+                            <option key={`homework-edit-${item}`} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </EditableDetailRow>
+                  <EditableDetailRow label="숙제 알림" value={formatNullableDateTime(selectedReport.homeworkReminderAt)} active={reportEditField === "homeworkReminderAt"} onToggle={() => setReportEditField((prev) => (prev === "homeworkReminderAt" ? "" : "homeworkReminderAt"))}>
+                    <DateTimeFieldPicker
+                      value={reportEditDraft.homeworkReminderAt}
+                      onChange={(next) => setReportEditDraft((p) => ({ ...p, homeworkReminderAt: next }))}
+                    />
+                  </EditableDetailRow>
+                  <EditableDetailRow label="숙제 완료" value={selectedReport.homeworkCompleted ? "완료" : "미완료"} active={reportEditField === "homeworkCompleted"} onToggle={() => setReportEditField((prev) => (prev === "homeworkCompleted" ? "" : "homeworkCompleted"))}>
+                    <label className="flex items-center gap-2 text-xs text-slate-700">
                       <input
-                        className="field"
-                        value={reportEditDraft.summaryItems}
-                        onChange={(e) => setReportEditDraft((p) => ({ ...p, summaryItems: e.target.value }))}
-                        placeholder="요약"
+                        type="checkbox"
+                        checked={reportEditDraft.homeworkCompleted}
+                        onChange={(e) => setReportEditDraft((p) => ({ ...p, homeworkCompleted: e.target.checked }))}
                       />
-                      <p className="text-[11px] text-slate-500">잘된 점</p>
-                      <input
-                        className="field"
-                        value={reportEditDraft.strengthNote}
-                        onChange={(e) => setReportEditDraft((p) => ({ ...p, strengthNote: e.target.value }))}
-                        placeholder="잘된 점"
-                      />
-                      <p className="text-[11px] text-slate-500">보완점</p>
-                      <input
-                        className="field"
-                        value={reportEditDraft.improveNote}
-                        onChange={(e) => setReportEditDraft((p) => ({ ...p, improveNote: e.target.value }))}
-                        placeholder="보완점"
-                      />
-                      <p className="text-[11px] text-slate-500">다음 목표</p>
-                      <input
-                        className="field"
-                        value={reportEditDraft.nextGoal}
-                        onChange={(e) => setReportEditDraft((p) => ({ ...p, nextGoal: e.target.value }))}
-                        placeholder="다음 목표"
-                      />
-                      <button className="btn w-full" disabled={updateReportMutation.isPending}>
-                        {updateReportMutation.isPending ? "수정중..." : "리포트 수정 저장"}
-                      </button>
-                    </form>
+                      숙제 수행 완료 표시
+                    </label>
+                  </EditableDetailRow>
+                  {!!reportEditField && (
+                    <button className="btn w-full" disabled={updateReportMutation.isPending} onClick={onSaveReportInlineField} type="button">
+                      {updateReportMutation.isPending ? "수정중..." : "리포트 수정 저장"}
+                    </button>
                   )}
 
                   <form className="mt-2 space-y-2" onSubmit={onCreateShare}>
@@ -2616,94 +3125,61 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
           />
           {selectedClient && (
             <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100 p-3 text-xs">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="font-semibold text-slate-900">선택 회원 정보</p>
-                <button
-                  type="button"
-                  className="rounded-md border border-slate-300 px-2 py-1 text-[11px] text-slate-700"
-                  onClick={() => setShowMemberEditForm((v) => !v)}
+              <p className="mb-2 font-semibold text-slate-900">선택 회원 정보</p>
+              <EditableDetailRow label="이름" value={selectedClient.name} active={memberEditField === "name"} onToggle={() => setMemberEditField((prev) => (prev === "name" ? "" : "name"))}>
+                <input className="field" value={clientEditDraft.name} onChange={(e) => setClientEditDraft((p) => ({ ...p, name: e.target.value }))} />
+              </EditableDetailRow>
+              <EditableDetailRow label="센터" value={selectedClientCenterName} active={memberEditField === "centerId"} onToggle={() => setMemberEditField((prev) => (prev === "centerId" ? "" : "centerId"))}>
+                <select className="field" value={clientEditDraft.centerId} onChange={(e) => setClientEditDraft((p) => ({ ...p, centerId: e.target.value }))}>
+                  <option value="">센터 선택</option>
+                  {centers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </EditableDetailRow>
+              <EditableDetailRow label="전화" value={selectedClient.phone || "-"} active={memberEditField === "phone"} onToggle={() => setMemberEditField((prev) => (prev === "phone" ? "" : "phone"))}>
+                <input className="field" value={clientEditDraft.phone} onChange={(e) => setClientEditDraft((p) => ({ ...p, phone: e.target.value }))} />
+              </EditableDetailRow>
+              <EditableDetailRow label="기본 수업형태" value={selectedClient.preferredLessonType === "PERSONAL" ? "개인" : selectedClient.preferredLessonType === "GROUP" ? "그룹" : "-"} active={memberEditField === "preferredLessonType"} onToggle={() => setMemberEditField((prev) => (prev === "preferredLessonType" ? "" : "preferredLessonType"))}>
+                <select
+                  className="field"
+                  value={clientEditDraft.preferredLessonType}
+                  onChange={(e) => setClientEditDraft((p) => ({ ...p, preferredLessonType: e.target.value as "" | "PERSONAL" | "GROUP" }))}
                 >
-                  {showMemberEditForm ? "수정 취소" : "회원 정보 수정"}
-                </button>
-              </div>
-              <DetailRow label="이름" value={selectedClient.name} />
-              <DetailRow label="센터" value={selectedClientCenterName} />
-              <DetailRow label="전화" value={selectedClient.phone || "-"} />
-              <DetailRow label="기본 수업형태" value={selectedClient.preferredLessonType === "PERSONAL" ? "개인" : selectedClient.preferredLessonType === "GROUP" ? "그룹" : "-"} />
-              <DetailRow label="회원 상태" value={selectedClient.memberStatus === "PAUSED" ? "잠시 휴식" : selectedClient.memberStatus === "FORMER" ? "과거 회원" : "현재 회원"} />
-              <DetailRow label="주의사항" value={selectedClient.flagsNote || "-"} />
+                  <option value="">선택 안함</option>
+                  <option value="PERSONAL">개인</option>
+                  <option value="GROUP">그룹</option>
+                </select>
+              </EditableDetailRow>
+              <EditableDetailRow label="회원 상태" value={selectedClient.memberStatus === "PAUSED" ? "잠시 휴식" : selectedClient.memberStatus === "FORMER" ? "과거 회원" : "현재 회원"} active={memberEditField === "memberStatus"} onToggle={() => setMemberEditField((prev) => (prev === "memberStatus" ? "" : "memberStatus"))}>
+                <select
+                  className="field"
+                  value={clientEditDraft.memberStatus}
+                  onChange={(e) => setClientEditDraft((p) => ({ ...p, memberStatus: e.target.value as "CURRENT" | "PAUSED" | "FORMER" }))}
+                >
+                  <option value="CURRENT">현재 회원</option>
+                  <option value="PAUSED">잠시 휴식</option>
+                  <option value="FORMER">과거 회원</option>
+                </select>
+              </EditableDetailRow>
+              <EditableDetailRow label="주의사항" value={selectedClient.flagsNote || "-"} active={memberEditField === "flagsNote"} onToggle={() => setMemberEditField((prev) => (prev === "flagsNote" ? "" : "flagsNote"))}>
+                <input className="field" value={clientEditDraft.flagsNote} onChange={(e) => setClientEditDraft((p) => ({ ...p, flagsNote: e.target.value }))} />
+              </EditableDetailRow>
               <DetailRow label="아픈 부위/증상" value={clientProfileQuery.data?.painNote || "-"} />
               <DetailRow label="목표" value={clientProfileQuery.data?.goalNote || "-"} />
               <DetailRow label="수술 이력" value={clientProfileQuery.data?.surgeryHistory || "-"} />
-              {showMemberEditForm && (
-                <form className="mt-3 space-y-2 rounded-md border border-slate-300 bg-white/80 p-2" onSubmit={onUpdateClient}>
-                  <p className="text-[11px] font-semibold text-slate-500">회원 정보 수정</p>
-                  <p className="text-[11px] text-slate-500">이름</p>
-                  <input
-                    className="field"
-                    value={clientEditDraft.name}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="이름"
-                    required
-                  />
-                  <p className="text-[11px] text-slate-500">센터 이동</p>
-                  <select
-                    className="field"
-                    value={clientEditDraft.centerId}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, centerId: e.target.value }))}
-                  >
-                    <option value="">센터 선택</option>
-                    {centers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-slate-500">기본 수업형태</p>
-                  <select
-                    className="field"
-                    value={clientEditDraft.preferredLessonType}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, preferredLessonType: e.target.value as "" | "PERSONAL" | "GROUP" }))}
-                  >
-                    <option value="">선택 안함</option>
-                    <option value="PERSONAL">개인</option>
-                    <option value="GROUP">그룹</option>
-                  </select>
-                  <p className="text-[11px] text-slate-500">회원 상태</p>
-                  <select
-                    className="field"
-                    value={clientEditDraft.memberStatus}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, memberStatus: e.target.value as "CURRENT" | "PAUSED" | "FORMER" }))}
-                  >
-                    <option value="CURRENT">현재 회원</option>
-                    <option value="PAUSED">잠시 휴식</option>
-                    <option value="FORMER">과거 회원</option>
-                  </select>
-                  <p className="text-[11px] text-slate-500">전화</p>
-                  <input
-                    className="field"
-                    value={clientEditDraft.phone}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, phone: e.target.value }))}
-                    placeholder="전화"
-                  />
-                  <p className="text-[11px] text-slate-500">주의사항</p>
-                  <input
-                    className="field"
-                    value={clientEditDraft.flagsNote}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, flagsNote: e.target.value }))}
-                    placeholder="주의사항"
-                  />
-                  <p className="text-[11px] text-slate-500">메모</p>
-                  <textarea
-                    className="field min-h-16"
-                    value={clientEditDraft.note}
-                    onChange={(e) => setClientEditDraft((p) => ({ ...p, note: e.target.value }))}
-                    placeholder="메모"
-                  />
-                  <button className="btn w-full" disabled={updateClientMutation.isPending}>
-                    {updateClientMutation.isPending ? "수정중..." : "회원 정보 저장"}
-                  </button>
-                </form>
+              <EditableDetailRow label="메모" value={selectedClient.note || "-"} active={memberEditField === "note"} onToggle={() => setMemberEditField((prev) => (prev === "note" ? "" : "note"))}>
+                <textarea className="field min-h-16" value={clientEditDraft.note} onChange={(e) => setClientEditDraft((p) => ({ ...p, note: e.target.value }))} />
+              </EditableDetailRow>
+              {!!memberEditField && (
+                <button
+                  type="button"
+                  className="btn mt-2 w-full"
+                  disabled={updateClientMutation.isPending}
+                  onClick={onSaveClientInlineField}
+                >
+                  {updateClientMutation.isPending ? "저장중..." : "회원 정보 저장"}
+                </button>
               )}
             </div>
           )}
@@ -2739,83 +3215,6 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 <p className="mb-1 text-[11px] text-slate-500">다음 레슨 계획</p>
                 <textarea name="nextLessonPlan" className="field min-h-16" value={personalMetaDraft.nextLessonPlan} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, nextLessonPlan: e.target.value }))} />
               </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <p className="text-[11px] text-slate-500">이번 숙제</p>
-                  <button
-                    type="button"
-                    className="rounded border border-slate-300 px-2 py-0.5 text-[11px] text-slate-700"
-                    onClick={applyLatestHomework}
-                  >
-                    이전 숙제 불러오기
-                  </button>
-                </div>
-                <input name="homeworkGiven" className="field" value={personalMetaDraft.homeworkGiven} onChange={(e) => setPersonalMetaDraft((p) => ({ ...p, homeworkGiven: e.target.value }))} />
-              </div>
-              <div>
-                <p className="mb-1 text-[11px] text-slate-500">숙제 알림 시각</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <input
-                    type="date"
-                    className="field"
-                    value={splitLocalDateTime(personalMetaDraft.homeworkReminderAt).date}
-                    onChange={(e) =>
-                      setPersonalMetaDraft((p) => ({
-                        ...p,
-                        homeworkReminderAt: mergeLocalDateTime(
-                          e.target.value,
-                          splitLocalDateTime(p.homeworkReminderAt).hour,
-                          splitLocalDateTime(p.homeworkReminderAt).minute
-                        )
-                      }))
-                    }
-                  />
-                  <select
-                    className="field"
-                    value={splitLocalDateTime(personalMetaDraft.homeworkReminderAt).hour}
-                    onChange={(e) =>
-                      setPersonalMetaDraft((p) => ({
-                        ...p,
-                        homeworkReminderAt: mergeLocalDateTime(
-                          splitLocalDateTime(p.homeworkReminderAt).date,
-                          e.target.value,
-                          splitLocalDateTime(p.homeworkReminderAt).minute
-                        )
-                      }))
-                    }
-                  >
-                    <option value="">시</option>
-                    {HOUR_OPTIONS.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="field"
-                    value={splitLocalDateTime(personalMetaDraft.homeworkReminderAt).minute}
-                    onChange={(e) =>
-                      setPersonalMetaDraft((p) => ({
-                        ...p,
-                        homeworkReminderAt: mergeLocalDateTime(
-                          splitLocalDateTime(p.homeworkReminderAt).date,
-                          splitLocalDateTime(p.homeworkReminderAt).hour,
-                          e.target.value
-                        )
-                      }))
-                    }
-                  >
-                    <option value="">분</option>
-                    {MINUTE_OPTIONS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <input name="homeworkReminderAt" type="hidden" value={personalMetaDraft.homeworkReminderAt} />
-                <p className="mt-1 text-[11px] text-slate-500">날짜와 시간을 각각 선택하세요. 비워두면 알림 없이 숙제만 저장됩니다.</p>
-              </div>
               <button className="btn md:col-span-2" disabled={!selectedMemberId}>회원 추적 저장</button>
             </form>
             {selectedMemberId && (
@@ -2831,7 +3230,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
             )}
           </Card>
 
-          <Card title="개인 기록 타임라인 (숙제 + 추적)">
+          <Card title="개인 기록 타임라인 (추적)">
             <VirtualList
               items={historyEntries}
               height={240}
@@ -2843,7 +3242,7 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                   onClick={() => setSelectedHistoryKey((prev) => (prev === entry.key ? "" : entry.key))}
                 >
                   <p className="text-xs font-semibold text-slate-800">
-                    {entry.kind === "tracking" ? "회원 추적" : "숙제"} | {formatDateTime(entry.createdAt)}
+                    회원 추적 | {formatDateTime(entry.createdAt)}
                   </p>
                   <p className="truncate text-xs text-slate-600">{entry.summary}</p>
                 </button>
@@ -2855,45 +3254,29 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
 
             {selectedHistoryEntry && (
               <div className="mt-3 rounded-lg border border-slate-200 bg-white/80 p-3 text-xs">
-                <p className="mb-2 font-semibold text-slate-800">
-                  {selectedHistoryEntry.kind === "tracking" ? "회원 추적 상세" : "숙제 상세"}
-                </p>
+                <p className="mb-2 font-semibold text-slate-800">회원 추적 상세</p>
                 <DetailRow label="기록일" value={formatDateTime(selectedHistoryEntry.createdAt)} />
-                {selectedHistoryEntry.kind === "tracking" ? (
-                  <>
-                    <DetailRow label="증상" value={(selectedHistoryEntry.detail as { painNote?: string }).painNote || "-"} />
-                    <DetailRow label="목표" value={(selectedHistoryEntry.detail as { goalNote?: string }).goalNote || "-"} />
-                    <DetailRow label="수술 이력" value={(selectedHistoryEntry.detail as { surgeryHistory?: string }).surgeryHistory || "-"} />
-                    <DetailRow label="수업 전 메모" value={(selectedHistoryEntry.detail as { beforeClassMemo?: string }).beforeClassMemo || "-"} />
-                    <DetailRow label="수업 후 기록" value={(selectedHistoryEntry.detail as { afterClassMemo?: string }).afterClassMemo || "-"} />
-                    <DetailRow label="다음 레슨 계획" value={(selectedHistoryEntry.detail as { nextLessonPlan?: string }).nextLessonPlan || "-"} />
-                    <DetailRow label="숙제" value={(selectedHistoryEntry.detail as { homeworkGiven?: string }).homeworkGiven || "-"} />
-                  </>
-                ) : (
-                  <>
-                    <DetailRow label="내용" value={(selectedHistoryEntry.detail as { content?: string }).content || "-"} />
-                    <DetailRow label="알림 시각" value={formatNullableDateTime((selectedHistoryEntry.detail as { remindAt?: string }).remindAt)} />
-                    <DetailRow label="완료 여부" value={(selectedHistoryEntry.detail as { completed?: boolean }).completed ? "완료" : "미완료"} />
-                  </>
-                )}
+                <DetailRow label="증상" value={(selectedHistoryEntry.detail as { painNote?: string }).painNote || "-"} />
+                <DetailRow label="목표" value={(selectedHistoryEntry.detail as { goalNote?: string }).goalNote || "-"} />
+                <DetailRow label="수술 이력" value={(selectedHistoryEntry.detail as { surgeryHistory?: string }).surgeryHistory || "-"} />
+                <DetailRow label="수업 전 메모" value={(selectedHistoryEntry.detail as { beforeClassMemo?: string }).beforeClassMemo || "-"} />
+                <DetailRow label="수업 후 기록" value={(selectedHistoryEntry.detail as { afterClassMemo?: string }).afterClassMemo || "-"} />
+                <DetailRow label="다음 레슨 계획" value={(selectedHistoryEntry.detail as { nextLessonPlan?: string }).nextLessonPlan || "-"} />
               </div>
             )}
           </Card>
 
           <Card title="비포/애프터 사진">
-            <div className="mb-2">
-              <button
-                type="button"
-                className="rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-700"
-                onClick={() => setShowProgressPhotoUploadModal(true)}
-                disabled={!selectedMemberId}
-              >
-                사진 등록
-              </button>
-            </div>
-
             <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <section className="rounded-lg border border-slate-200 bg-white/70 p-2">
+              <section
+                className="rounded-lg border border-slate-200 bg-white/70 p-2 cursor-pointer"
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest("button,input,select,textarea")) return;
+                  setProgressPhotoPhase("BEFORE");
+                  setShowProgressPhotoUploadModal(true);
+                }}
+              >
                 <p className="mb-2 text-xs font-semibold text-slate-700">비포</p>
                 <div className="grid grid-cols-2 gap-2">
                   {beforeProgressPhotos.map((p) => (
@@ -2941,7 +3324,15 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
                 </div>
                 {!beforeProgressPhotos.length && <p className="text-[11px] text-slate-500">비포 사진이 없습니다.</p>}
               </section>
-              <section className="rounded-lg border border-slate-200 bg-white/70 p-2">
+              <section
+                className="rounded-lg border border-slate-200 bg-white/70 p-2 cursor-pointer"
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest("button,input,select,textarea")) return;
+                  setProgressPhotoPhase("AFTER");
+                  setShowProgressPhotoUploadModal(true);
+                }}
+              >
                 <p className="mb-2 text-xs font-semibold text-slate-700">애프터</p>
                 <div className="grid grid-cols-2 gap-2">
                   {afterProgressPhotos.map((p) => (
@@ -3086,6 +3477,17 @@ export default function DashboardPage({ onLogout }: { onLogout: () => void }) {
         </div>
       )}
 
+      <button
+        type="button"
+        className="fixed bottom-4 right-4 z-40 rounded-full border border-slate-300 bg-white px-4 py-3 text-xs font-semibold text-slate-700 shadow-lg md:hidden"
+        onClick={() => {
+          setCalendarQuickTargetDate(sessionDate);
+          setCalendarQuickOpen(true);
+        }}
+      >
+        + 빠른기록
+      </button>
+
     </main>
   );
 }
@@ -3096,6 +3498,28 @@ function Card({ title, children, className = "" }: { title?: string; children: R
       {title && <h2 className="mb-3 font-['Fraunces'] text-xl text-slate-900">{title}</h2>}
       {children}
     </article>
+  );
+}
+
+function HelpChip({ label, help }: { label: string; help: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className="relative rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+      onClick={() => setOpen((v) => !v)}
+    >
+      {label}
+      {open && (
+        <span className="absolute bottom-[calc(100%+8px)] left-1/2 z-50 w-56 -translate-x-1/2 rounded-xl border border-white/70 bg-white/95 p-3 text-left text-xs text-slate-700 shadow-2xl backdrop-blur-md">
+          {help}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -3153,6 +3577,140 @@ function VirtualList<T>({
   );
 }
 
+function MonthCalendar({
+  month,
+  dayStatus,
+  selectedDate,
+  onPickDate
+}: {
+  month: string;
+  dayStatus: Record<string, { total: number; missingSequence: boolean; missingReport: boolean }>;
+  selectedDate: string;
+  onPickDate: (date: string, openQuick?: boolean) => void;
+}) {
+  const [year, monthNum] = month.split("-").map(Number);
+  const first = new Date(year, (monthNum || 1) - 1, 1);
+  const startWeekday = first.getDay();
+  const daysInMonth = new Date(year, monthNum || 1, 0).getDate();
+  const cellCount = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
+  const cells = Array.from({ length: cellCount }, (_, idx) => {
+    const day = idx - startWeekday + 1;
+    if (day < 1 || day > daysInMonth) return null;
+    const date = `${year}-${String(monthNum).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return { day, date, status: dayStatus[date] };
+  });
+
+  return (
+    <div className="grid grid-cols-7 gap-0.5">
+      {["일", "월", "화", "수", "목", "금", "토"].map((w) => (
+        <p key={w} className="px-1 py-0.5 text-center text-[10px] font-semibold text-slate-500">{w}</p>
+      ))}
+      {cells.map((cell, idx) => (
+        <div key={`${month}-${idx}`} className="min-h-[62px]">
+          {!cell ? <div className="h-full rounded border border-transparent" /> : (
+            <button
+              type="button"
+              className={`h-full w-full rounded border px-1 py-0.5 text-left ${selectedDate === cell.date ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white"}`}
+              onClick={(e) => onPickDate(cell.date, e.ctrlKey || e.metaKey)}
+            >
+              <p className="text-xs font-semibold text-slate-800">{cell.day}</p>
+              {cell.status && (
+                <div className="mt-1 space-y-1">
+                  <span className="inline-flex rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[9px] text-sky-700">{cell.status.total} 세션</span>
+                  <div className="flex items-center gap-1">
+                    {cell.status.missingSequence && <span title="시퀀스 미등록 세션 있음" className="h-2 w-2 rounded-full bg-emerald-400" />}
+                    {cell.status.missingReport && <span title="리포트 미등록 세션 있음" className="h-2 w-2 rounded-full bg-amber-400" />}
+                  </div>
+                </div>
+              )}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WeekCalendar({
+  startDate,
+  dayStatus,
+  selectedDate,
+  onPickDate
+}: {
+  startDate: string;
+  dayStatus: Record<string, { total: number; missingSequence: boolean; missingReport: boolean }>;
+  selectedDate: string;
+  onPickDate: (date: string, openQuick?: boolean) => void;
+}) {
+  const start = startOfWeek(startDate);
+  const cells = Array.from({ length: 7 }, (_, idx) => {
+    const date = shiftDay(start, idx);
+    return { date, day: Number(date.slice(8, 10)), status: dayStatus[date] };
+  });
+  return (
+    <div className="grid grid-cols-7 gap-1">
+      {["일", "월", "화", "수", "목", "금", "토"].map((w) => (
+        <p key={`week-head-${w}`} className="px-1 py-0.5 text-center text-[10px] font-semibold text-slate-500">{w}</p>
+      ))}
+      {cells.map((cell) => (
+        <button
+          key={cell.date}
+          type="button"
+          className={`min-h-[72px] rounded border px-1.5 py-1 text-left ${selectedDate === cell.date ? "border-slate-400 bg-slate-100" : "border-slate-200 bg-white"}`}
+          onClick={(e) => onPickDate(cell.date, e.ctrlKey || e.metaKey)}
+        >
+          <p className="text-xs font-semibold text-slate-800">{cell.day}</p>
+          {cell.status ? (
+            <div className="mt-1 space-y-1">
+              <span className="inline-flex rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[9px] text-sky-700">{cell.status.total} 세션</span>
+              <div className="flex items-center gap-1">
+                {cell.status.missingSequence && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
+                {cell.status.missingReport && <span className="h-2 w-2 rounded-full bg-amber-400" />}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 text-[10px] text-slate-400">세션 없음</p>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function getMonthRange(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  const start = new Date(y, (m || 1) - 1, 1);
+  const end = new Date(y, m || 1, 0);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { from: fmt(start), to: fmt(end) };
+}
+
+function getWeekRange(date: string) {
+  const start = startOfWeek(date);
+  return { from: start, to: shiftDay(start, 6) };
+}
+
+function startOfWeek(date: string) {
+  const base = new Date(date);
+  if (Number.isNaN(base.getTime())) return date;
+  const day = base.getDay();
+  const start = new Date(base);
+  start.setDate(base.getDate() - day);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+}
+
+function shiftDay(date: string, amount: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + amount);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shiftMonth(month: string, amount: number) {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, (m || 1) - 1 + amount, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function FieldWithVoice({
   label,
   value,
@@ -3185,6 +3743,114 @@ function FieldWithVoice({
   );
 }
 
+function DateTimeFieldPicker({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const now = useMemo(() => splitLocalDateTime(currentLocalDateTimeRounded10())!, []);
+  const parsed = splitLocalDateTime(value) || now;
+  const currentYear = now.year;
+  const yearOptions = useMemo(() => {
+    const years = Array.from({ length: 5 }, (_, i) => currentYear - 1 + i);
+    if (!years.includes(parsed.year)) years.push(parsed.year);
+    return years.sort((a, b) => a - b);
+  }, [currentYear, parsed.year]);
+  const dayMax = getDaysInMonth(parsed.year, parsed.month);
+  const dayOptions = Array.from({ length: dayMax }, (_, i) => i + 1);
+  const normalizedMinute = MINUTE_OPTIONS.includes(parsed.minute)
+    ? parsed.minute
+    : MINUTE_OPTIONS[Math.floor(Number(parsed.minute || "0") / 10)] || "00";
+  const normalized: LocalDateTimeParts = {
+    ...parsed,
+    day: Math.min(parsed.day, dayMax),
+    minute: normalizedMinute
+  };
+
+  const update = (patch: Partial<LocalDateTimeParts>) => {
+    const nextRaw: LocalDateTimeParts = { ...normalized, ...patch };
+    const nextDayMax = getDaysInMonth(nextRaw.year, nextRaw.month);
+    const next: LocalDateTimeParts = {
+      ...nextRaw,
+      day: Math.min(nextRaw.day, nextDayMax),
+      minute: MINUTE_OPTIONS.includes(nextRaw.minute) ? nextRaw.minute : "00"
+    };
+    onChange(joinLocalDateTime(next));
+  };
+
+  return (
+    <div className="grid grid-cols-5 gap-2">
+        <select className="field !py-2" value={String(normalized.year)} onChange={(e) => update({ year: Number(e.target.value) })}>
+          {yearOptions.map((year) => (
+            <option key={`year-${year}`} value={year}>
+              {year}년
+            </option>
+          ))}
+        </select>
+        <select className="field !py-2" value={String(normalized.month)} onChange={(e) => update({ month: Number(e.target.value) })}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+            <option key={`month-${month}`} value={month}>
+              {month}월
+            </option>
+          ))}
+        </select>
+        <select className="field !py-2" value={String(normalized.day)} onChange={(e) => update({ day: Number(e.target.value) })}>
+          {dayOptions.map((day) => (
+            <option key={`day-${day}`} value={day}>
+              {day}일
+            </option>
+          ))}
+        </select>
+        <select className="field !py-2" value={normalized.hour} onChange={(e) => update({ hour: e.target.value })}>
+          {HOUR_OPTIONS.map((hour) => (
+            <option key={`hour-${hour}`} value={hour}>
+              {hour}시
+            </option>
+          ))}
+        </select>
+        <select className="field !py-2" value={normalized.minute} onChange={(e) => update({ minute: e.target.value })}>
+          {MINUTE_OPTIONS.map((minute) => (
+            <option key={`minute-${minute}`} value={minute}>
+              {minute}분
+            </option>
+          ))}
+        </select>
+    </div>
+  );
+}
+
+function EditableDetailRow({
+  label,
+  value,
+  active,
+  onToggle,
+  children
+}: {
+  label: string;
+  value: string;
+  active: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`mb-1 rounded-md border p-1.5 ${active ? "border-cyan-300 bg-cyan-50/60" : "border-slate-200 bg-white/70"}`}>
+      <div className="flex w-full items-center gap-2">
+        <button type="button" className="shrink-0 font-medium text-slate-700" onClick={onToggle}>
+          {label}:
+        </button>
+        {!active && (
+          <button type="button" className="min-w-0 flex-1 truncate text-left text-slate-600" onClick={onToggle}>
+            {value}
+          </button>
+        )}
+        {active && <div className="min-w-0 flex-1">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
 function createSpeechRecognition(): BrowserSpeechRecognition | null {
   const w = window as unknown as {
     SpeechRecognition?: new () => BrowserSpeechRecognition;
@@ -3207,6 +3873,35 @@ function toEquipmentTypeLabel(raw?: string | null) {
   return EQUIPMENT_OPTIONS.find((o) => o.value === raw)?.label || raw;
 }
 
+function splitLocalDateTime(value?: string | null): LocalDateTimeParts | null {
+  if (!value) return null;
+  const [datePart, timePart] = value.split("T");
+  if (!datePart || !timePart) return null;
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":");
+  if (!year || !month || !day || hour == null || minute == null) return null;
+  return {
+    year,
+    month,
+    day,
+    hour: String(Number(hour)).padStart(2, "0"),
+    minute: String(Number(minute)).padStart(2, "0")
+  };
+}
+
+function joinLocalDateTime(parts: LocalDateTimeParts) {
+  const yyyy = String(parts.year);
+  const mm = String(parts.month).padStart(2, "0");
+  const dd = String(parts.day).padStart(2, "0");
+  const hh = String(Number(parts.hour)).padStart(2, "0");
+  const mi = String(Number(parts.minute)).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
+}
+
 function toIsoFromLocalDateTime(value?: string) {
   if (!value) return "";
   const d = new Date(value);
@@ -3214,20 +3909,16 @@ function toIsoFromLocalDateTime(value?: string) {
   return d.toISOString();
 }
 
-function splitLocalDateTime(value?: string) {
-  if (!value || !value.includes("T")) {
-    return { date: "", hour: "", minute: "" };
-  }
-  const [date, time] = value.split("T");
-  const [hour, minute] = (time || "").split(":");
-  return { date: date || "", hour: hour || "", minute: (minute || "").slice(0, 2) };
-}
-
-function mergeLocalDateTime(date?: string, hour?: string, minute?: string) {
-  if (!date) return "";
-  const safeHour = hour && hour !== "" ? hour : "00";
-  const safeMinute = minute && minute !== "" ? minute : "00";
-  return `${date}T${safeHour}:${safeMinute}`;
+function toLocalDateTimeInput(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
 }
 
 function currentLocalDateTimeRounded10() {
@@ -3264,4 +3955,27 @@ function formatSessionSummary(report: {
   const time = report.sessionStartTime || "시간 미입력";
   const type = report.sessionType === "PERSONAL" ? "개인" : report.sessionType === "GROUP" ? "그룹" : "수업유형 미입력";
   return `${date} ${time} ${type}`;
+}
+
+function mergeSequenceLines(base: string, additions: string[]) {
+  const existing = base
+    .split("\n")
+    .map((line) => line.trim().replace(/^\d+\.\s*/, ""))
+    .filter(Boolean);
+  const merged = Array.from(new Set([...existing, ...additions.map((x) => x.trim()).filter(Boolean)]));
+  return merged.map((item, idx) => `${idx + 1}. ${item}`).join("\n");
+}
+
+function summarizeDayOverview(
+  sessions: Array<{ id: string; date: string; hasReport: boolean }>,
+  sequenceBySessionId: Record<string, unknown>
+) {
+  return sessions.reduce<Record<string, { total: number; missingSequence: boolean; missingReport: boolean }>>((acc, s) => {
+    const cur = acc[s.date] || { total: 0, missingSequence: false, missingReport: false };
+    cur.total += 1;
+    if (!sequenceBySessionId[s.id]) cur.missingSequence = true;
+    if (!s.hasReport) cur.missingReport = true;
+    acc[s.date] = cur;
+    return acc;
+  }, {});
 }
